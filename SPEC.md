@@ -51,13 +51,11 @@
 
 <mark>`![Primeira Tela para comparação](images/tela1.png)
 
-`</mark>
-<mark>`![Segunda Tela para comparação](images/tela2.png)
+![Segunda Tela para comparação](images/tela2.png)
 
-`</mark>
-<mark>`![Terceira Tela para comparação](images/tela3.png)
+![Terceira Tela para comparação](images/tela3.png)
 
-`</mark>
+</mark>
 
 ## Especificação textual
 
@@ -99,4 +97,4 @@ Para cada um dos requisitos abaixo (detalhados no [Enunciado do Trabalho final -
 > - Para cada item, **explique por que** não será implementado ou por
 >   que será implementado parcialmente.
 
-<mark>`**Não pretendo implementar pistas com geometria curva e loops**, pois o cálculo de colisão contínua da esfera sobre malhas curvas arbitrárias vai adicionar uma complexidade matemática adicional e excessiva.`</mark>
+<mark>`Não pretendo implementar pistas com geometria curva e loops, pois o cálculo de colisão contínua da esfera sobre malhas curvas arbitrárias vai adicionar uma complexidade matemática adicional e excessiva.`</mark>
