@@ -6,15 +6,12 @@
 
 ## Integrantes da dupla
 
-- **Aluno 1 - Nome**: <mark>`<preencher>`</mark>
-- **Aluno 1 - Cartão UFRGS**: <mark>`<preencher>`</mark>
-
-- **Aluno 2 - Nome**: <mark>`<preencher>`</mark>
-- **Aluno 2 - Cartão UFRGS**: <mark>`<preencher>`</mark>
+- **Aluno 1 - Nome**: <mark>`Guilherme Martins Mulazzani`</mark>
+- **Aluno 1 - Cartão UFRGS**: <mark>`00597915`</mark>
 
 ## Detalhes do que será implementado
 
-- **Título do trabalho**: <mark>`<preencher>`</mark>
+- **Título do trabalho**: <mark>`Golf it Again!`</mark>
 - **Parágrafo curto descrevendo o que será implementado**: <mark>`<preencher>`</mark>
 
 ## Especificação visual
@@ -34,7 +31,7 @@
 >   do próprio repositório. Mas, garanta que qualquer um tenha
 >   permissão de acesso ao vídeo através deste link.
 
-<mark>`<preencher>`</mark>
+<mark>`youtu.be/JBSSErUaLdo?si=x77eKVEaFgUZ70qu`</mark>
 
 ### Vídeo - Timestamp
 
@@ -43,8 +40,8 @@
 >   será a base de comparação para avaliar se o seu trabalho final
 >   conseguiu ou não reproduzir a referência.
 
-- **Timestamp inicial**: <mark>`<preencher>`</mark>
-- **Timestamp final**: <mark>`<preencher>`</mark>
+- **Timestamp inicial**: <mark>`2:16 min`</mark>
+- **Timestamp final**: <mark>`2:46 min`</mark>
 
 ### Imagens
 
