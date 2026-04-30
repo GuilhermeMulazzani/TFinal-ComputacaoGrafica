@@ -49,7 +49,7 @@
 > - Coloque aqui **três imagens** capturadas do vídeo acima, que você
 >   irá usar como ilustração para as explicações que vêm abaixo.
 
-<mark>`![Primeira Tela para comparação](images/tela1.png)
+<mark>![Primeira Tela para comparação](images/tela1.png)
 
 ![Segunda Tela para comparação](images/tela2.png)
 
