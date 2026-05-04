@@ -14,6 +14,8 @@
 - **Título do trabalho**: <mark>`Golf it Again!`</mark>
 - **Parágrafo curto descrevendo o que será implementado**: <mark>`<preencher>`</mark>
 
+> Comentário Professor: Faltou preencher o parágrafo.
+
 ## Especificação visual
 
 ### Vídeo - Link
@@ -78,6 +80,8 @@ Para cada um dos requisitos abaixo (detalhados no [Enunciado do Trabalho final -
 
 ### Modelos de Iluminação em todos os objetos
 <mark>`A iluminação do ambiente vai ser mais baixa, com contrastes de fontes de luz pontuais espalhadas na pista, o que vai gerar reflexos na bola e obstáculos. A iluminação será calculado utilizando modelo de Blinn-Phong.`</mark>
+
+> Comentário Professor: o efeito da fonte de luz que se movimenta junto com a bola também é importante implementar.
 
 ### Mapeamento de texturas em todos os objetos
 <mark>`Todos vértices terão mapeamento UV. No piso, vai ter uma textura que vai simular material sintético, as paredes terão textura de metal/madeira, enquanto a bola vai ter uma textura vibrante, para ter o contraste visual com o cenário.`</mark>
