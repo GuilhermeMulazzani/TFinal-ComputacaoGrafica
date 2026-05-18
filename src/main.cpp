@@ -5,7 +5,7 @@
 //   INF01047 Computação Gráfica e Visualização I
 //               Prof. Eduardo Gastal
 //
-//     CÓDIGO BASE PARA O TRABALHO FINAL
+//     CÓDIGO BASE PARA O TRABALHO FINAL - PROTÓTIPO MINI GOLF
 //
 
 #include <cmath>
@@ -39,7 +39,7 @@
 
 // Headers locais
 #include "utils.h"
-#include "matrices.h" // AQUI ESTÁ SEU ARQUIVO PERFEITO!
+#include "matrices.h"
 
 // Estrutura do modelo OBJ
 struct ObjModel
@@ -69,16 +69,6 @@ struct ObjModel
 
         if (!err.empty()) fprintf(stderr, "\n%s\n", err.c_str());
         if (!ret) throw std::runtime_error("Erro ao carregar modelo.");
-
-        for (size_t shape = 0; shape < shapes.size(); ++shape)
-        {
-            if (shapes[shape].name.empty())
-            {
-                fprintf(stderr, "Erro: Objeto sem nome dentro do arquivo '%s'.\n", filename);
-                throw std::runtime_error("Objeto sem nome.");
-            }
-            printf("- Objeto '%s'\n", shapes[shape].name.c_str());
-        }
         printf("OK.\n");
     }
 };
@@ -127,19 +117,31 @@ float g_AngleX = 0.0f;
 float g_AngleY = 0.0f;
 float g_AngleZ = 0.0f;
 
+// ====================================================================
+// CORREÇÃO ERRO 2: DECLARAÇÃO DAS VARIÁVEIS GLOBAIS DO MOUSE
+// ====================================================================
 bool g_LeftMouseButtonPressed = false;
-bool g_RightMouseButtonPressed = false; 
-bool g_MiddleMouseButtonPressed = false; 
+double g_LastCursorPosX = 0.0;
+double g_LastCursorPosY = 0.0;
 
 float g_CameraTheta = 0.0f; 
-float g_CameraPhi = 0.0f;   
-float g_CameraDistance = 3.5f; 
+float g_CameraPhi = 0.4f;   
+float g_CameraDistance = 4.5f; 
 
 // ====================================================================
-// VARIÁVEIS FÍSICAS DO GOLF
+// VARIÁVEIS MECÂNICAS DO MINI GOLF
 // ====================================================================
 glm::vec4 g_BallPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 glm::vec4 g_BallVelocity = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+float g_ShotIntensity = 0.0f;
+bool g_IsCharging = false;
+const float MAX_INTENSITY = 20.0f;
+const float CHARGE_SPEED = 12.0f; 
+
+glm::vec4 g_HolePosition = glm::vec4(0.0f, -0.19f, -6.0f, 1.0f);
+float g_HoleRadius = 0.35f;
+bool g_BallInHole = false;
 
 bool g_UsePerspectiveProjection = true;
 bool g_ShowInfoText = true;
@@ -166,11 +168,10 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Guilherme Martins Mulazzani", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Protótipo Parcial", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
-        fprintf(stderr, "ERROR: glfwCreateWindow() failed.\n");
         std::exit(EXIT_FAILURE);
     }
 
@@ -187,11 +188,9 @@ int main(int argc, char* argv[])
 
     LoadShadersFromFiles();
 
-    // Carrega texturas bases
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");      
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); 
 
-    // Carrega modelos base (Sphere para bola, Plane para chão)
     ObjModel spheremodel("../../data/sphere.obj");
     ComputeNormals(&spheremodel);
     BuildTrianglesAndAddToVirtualScene(&spheremodel);
@@ -209,23 +208,61 @@ int main(int argc, char* argv[])
 
     while (!glfwWindowShouldClose(window))
     {
-        // ====================================================================
-        // FÍSICA NO TEMPO DELTA
-        // ====================================================================
-        static float lastFrameTime = 0.0f;
         float currentFrameTime = (float)glfwGetTime();
+        static float lastFrameTime = 0.0f;
         float deltaTime = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
 
-        // Atrito
-        g_BallVelocity -= g_BallVelocity * 1.5f * deltaTime; 
-        if (glm::length(g_BallVelocity) < 0.05f) {
-            g_BallVelocity = glm::vec4(0.0f);
+        if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) 
+        {
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) 
+            {
+                g_IsCharging = true;
+                g_ShotIntensity += CHARGE_SPEED * deltaTime;
+                if (g_ShotIntensity > MAX_INTENSITY) g_ShotIntensity = MAX_INTENSITY;
+            } 
+            else 
+            {
+                if (g_IsCharging) 
+                {
+                    float dir_x = -sin(g_CameraTheta);
+                    float dir_z = -cos(g_CameraTheta);
+                    g_BallVelocity = glm::vec4(dir_x, 0.0f, dir_z, 0.0f) * g_ShotIntensity;
+                    g_ShotIntensity = 0.0f;
+                    g_IsCharging = false;
+                }
+            }
         }
-        g_BallPosition += g_BallVelocity * deltaTime;
 
-        // Limpa a tela
-        glClearColor(0.1f, 0.1f, 0.15f, 1.0f); 
+        if (!g_BallInHole) 
+        {
+            g_BallVelocity -= g_BallVelocity * 1.3f * deltaTime; 
+            if (glm::length(g_BallVelocity) < 0.07f) g_BallVelocity = glm::vec4(0.0f);
+            g_BallPosition += g_BallVelocity * deltaTime;
+
+            if (g_BallPosition.x < -1.85f) { g_BallPosition.x = -1.85f; g_BallVelocity.x *= -1.0f; }
+            if (g_BallPosition.x >  1.85f) { g_BallPosition.x =  1.85f; g_BallVelocity.x *= -1.0f; }
+            if (g_BallPosition.z < -7.85f) { g_BallPosition.z = -7.85f; g_BallVelocity.z *= -1.0f; }
+            if (g_BallPosition.z >  1.85f) { g_BallPosition.z =  1.85f; g_BallVelocity.z *= -1.0f; }
+
+            float distToHole = glm::distance(glm::vec3(g_BallPosition), glm::vec3(g_HolePosition));
+            if (distToHole < g_HoleRadius) 
+            {
+                g_BallInHole = true;
+                g_BallVelocity = glm::vec4(0.0f);
+                g_BallPosition = g_HolePosition; 
+                g_BallPosition.y = -0.4f; 
+            }
+        }
+
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) 
+        {
+            g_BallPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            g_BallVelocity = glm::vec4(0.0f);
+            g_BallInHole = false;
+        }
+
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f); 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glUseProgram(g_GpuProgramID);
 
@@ -234,35 +271,15 @@ int main(int argc, char* argv[])
         float z = r*cos(g_CameraPhi)*cos(g_CameraTheta);
         float x = r*cos(g_CameraPhi)*sin(g_CameraTheta);
 
-        // ====================================================================
-        // CÂMERA ORBITANDO A BOLA
-        // ====================================================================
         glm::vec4 camera_lookat_l  = g_BallPosition; 
+        if(g_BallInHole) camera_lookat_l.y = -0.2f;
+
         glm::vec4 camera_position_c  = g_BallPosition + glm::vec4(x,y,z,0.0f); 
         glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; 
         glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); 
 
         glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
-
-        glm::mat4 projection;
-        float nearplane = -0.1f;  
-        float farplane  = -50.0f; 
-
-        if (g_UsePerspectiveProjection)
-        {
-            float field_of_view = 3.141592 / 3.0f;
-            projection = Matrix_Perspective(field_of_view, g_ScreenRatio, nearplane, farplane);
-        }
-        else
-        {
-            float t = 1.5f*g_CameraDistance/2.5f;
-            float b = -t;
-            float r = t*g_ScreenRatio;
-            float l = -r;
-            projection = Matrix_Orthographic(l, r, b, t, nearplane, farplane);
-        }
-
-        glm::mat4 model = Matrix_Identity(); 
+        glm::mat4 projection = Matrix_Perspective(3.141592 / 3.0f, g_ScreenRatio, -0.1f, -50.0f);
 
         glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
@@ -271,20 +288,72 @@ int main(int argc, char* argv[])
         #define PLANE  2
 
         // ====================================================================
-        // RENDERIZAÇÃO
+        // CORREÇÃO ERRO 1: ADICIONADO DECLARAÇÃO DE glm::mat4 ANTES DE model
         // ====================================================================
         
-        // Pista (Plano esticado com Matrix_Scale nativo de matrices.h)
-        model = Matrix_Translate(0.0f, -0.2f, 0.0f) * Matrix_Scale(10.0f, 1.0f, 10.0f);
+        // 1. O Chão da pista
+        glm::mat4 model = Matrix_Translate(0.0f, -0.2f, -3.0f) * Matrix_Scale(2.0f, 1.0f, 5.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, PLANE);
         DrawVirtualObject("the_plane");
 
-        // Bola
-        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(0.2f, 0.2f, 0.2f);
+        // 2. As Paredes Visuais
+        // Parede Esquerda
+        model = Matrix_Translate(-2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+
+        // Parede Direita
+        model = Matrix_Translate(2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+
+        // Parede do Fundo
+        model = Matrix_Translate(0.0f, 0.1f, -8.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+
+        // Parede Inicial
+        model = Matrix_Translate(0.0f, 0.1f, 2.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+
+        // 3. O Buraco
+        model = Matrix_Translate(g_HolePosition.x, g_HolePosition.y, g_HolePosition.z) * Matrix_Scale(g_HoleRadius, 0.01f, g_HoleRadius);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, SPHERE);
         DrawVirtualObject("the_sphere");
+
+        // 4. A Bola de Golf
+        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(0.18f, 0.18f, 0.18f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        glUniform1i(g_object_id_uniform, SPHERE);
+        DrawVirtualObject("the_sphere");
+
+        // 5. O Taco (Animação de recuo)
+        if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) 
+        {
+            float back_x = sin(g_CameraTheta);
+            float back_z = cos(g_CameraTheta);
+            float recuo = 0.35f + (g_ShotIntensity / MAX_INTENSITY) * 0.8f; 
+            
+            glm::vec4 clubPos = g_BallPosition + glm::vec4(back_x, 0.0f, back_z, 0.0f) * recuo;
+            clubPos.y = 0.2f; 
+
+            model = Matrix_Translate(clubPos.x, clubPos.y, clubPos.z) * Matrix_Scale(0.05f, 0.5f, 0.05f);
+            glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+            glUniform1i(g_object_id_uniform, SPHERE);
+            DrawVirtualObject("the_sphere");
+        }
+
+        if (g_IsCharging) {
+            char txt[30];
+            snprintf(txt, 30, "FORCA: %.1f", g_ShotIntensity);
+            TextRendering_PrintString(window, txt, -0.9f, -0.9f, 1.0f);
+        }
+        if (g_BallInHole) {
+            TextRendering_PrintString(window, "CONCLUIDO! APERTE R PARA RESETAR", -0.4f, 0.0f, 1.0f);
+        }
 
         TextRendering_ShowFramesPerSecond(window);
 
@@ -296,53 +365,30 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-
-// =======================================================================================
-// FUNÇÕES AUXILIARES DE CARREGAMENTO (TinyOBJ, Texturas, Shaders) MANTIDAS
-// =======================================================================================
-
 void LoadTextureImage(const char* filename) {
     stbi_set_flip_vertically_on_load(true);
     int width, height, channels;
     unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
-    if ( data == NULL ) {
-        fprintf(stderr, "ERROR: Cannot open image file \"%s\".\n", filename);
-        std::exit(EXIT_FAILURE);
-    }
-    GLuint texture_id;
-    GLuint sampler_id;
-    glGenTextures(1, &texture_id);
-    glGenSamplers(1, &sampler_id);
+    if ( data == NULL ) std::exit(EXIT_FAILURE);
+    GLuint texture_id; GLuint sampler_id;
+    glGenTextures(1, &texture_id); glGenSamplers(1, &sampler_id);
     glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler_id, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glSamplerParameteri(sampler_id, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
     GLuint textureunit = g_NumLoadedTextures;
-    glActiveTexture(GL_TEXTURE0 + textureunit);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glActiveTexture(GL_TEXTURE0 + textureunit); glBindTexture(GL_TEXTURE_2D, texture_id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glBindSampler(textureunit, sampler_id);
-    stbi_image_free(data);
-    g_NumLoadedTextures += 1;
+    glGenerateMipmap(GL_TEXTURE_2D); glBindSampler(textureunit, sampler_id);
+    stbi_image_free(data); g_NumLoadedTextures += 1;
 }
 
 void DrawVirtualObject(const char* object_name) {
     glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
-    glm::vec3 bbox_min = g_VirtualScene[object_name].bbox_min;
-    glm::vec3 bbox_max = g_VirtualScene[object_name].bbox_max;
-    glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
-    glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
-    glDrawElements(
-        g_VirtualScene[object_name].rendering_mode,
-        g_VirtualScene[object_name].num_indices,
-        GL_UNSIGNED_INT,
-        (void*)(g_VirtualScene[object_name].first_index * sizeof(GLuint))
-    );
+    glUniform4f(g_bbox_min_uniform, g_VirtualScene[object_name].bbox_min.x, g_VirtualScene[object_name].bbox_min.y, g_VirtualScene[object_name].bbox_min.z, 1.0f);
+    glUniform4f(g_bbox_max_uniform, g_VirtualScene[object_name].bbox_max.x, g_VirtualScene[object_name].bbox_max.y, g_VirtualScene[object_name].bbox_max.z, 1.0f);
+    glDrawElements(g_VirtualScene[object_name].rendering_mode, g_VirtualScene[object_name].num_indices, GL_UNSIGNED_INT, (void*)(g_VirtualScene[object_name].first_index * sizeof(GLuint)));
     glBindVertexArray(0);
 }
 
@@ -365,61 +411,44 @@ void LoadShadersFromFiles() {
 }
 
 void PushMatrix(glm::mat4 M) { g_MatrixStack.push(M); }
-void PopMatrix(glm::mat4& M) {
-    if ( g_MatrixStack.empty() ) M = Matrix_Identity();
-    else { M = g_MatrixStack.top(); g_MatrixStack.pop(); }
-}
+void PopMatrix(glm::mat4& M) { if ( g_MatrixStack.empty() ) M = Matrix_Identity(); else { M = g_MatrixStack.top(); g_MatrixStack.pop(); } }
 
 void ComputeNormals(ObjModel* model) {
     if ( !model->attrib.normals.empty() ) return;
     std::set<unsigned int> sgroup_ids;
     for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
-        size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-        for (size_t triangle = 0; triangle < num_triangles; ++triangle) {
-            unsigned int sgroup = model->shapes[shape].mesh.smoothing_group_ids[triangle];
-            sgroup_ids.insert(sgroup);
+        for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
+            sgroup_ids.insert(model->shapes[shape].mesh.smoothing_group_ids[triangle]);
         }
     }
-    size_t num_vertices = model->attrib.vertices.size() / 3;
-    model->attrib.normals.reserve( 3*num_vertices );
-
+    size_t num_vertices = model->attrib.vertices.size() / 3; model->attrib.normals.reserve( 3*num_vertices );
     for (const unsigned int & sgroup : sgroup_ids) {
-        std::vector<int> num_triangles_per_vertex(num_vertices, 0);
-        std::vector<glm::vec4> vertex_normals(num_vertices, glm::vec4(0.0f,0.0f,0.0f,0.0f));
-
+        std::vector<int> num_triangles_per_vertex(num_vertices, 0); std::vector<glm::vec4> vertex_normals(num_vertices, glm::vec4(0.0f));
         for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
-            size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-            for (size_t triangle = 0; triangle < num_triangles; ++triangle) {
-                unsigned int sgroup_tri = model->shapes[shape].mesh.smoothing_group_ids[triangle];
-                if (sgroup_tri != sgroup) continue;
-                glm::vec4  vertices[3];
+            for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
+                if (model->shapes[shape].mesh.smoothing_group_ids[triangle] != sgroup) continue;
+                glm::vec4 v[3];
                 for (size_t vertex = 0; vertex < 3; ++vertex) {
                     tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
-                    vertices[vertex] = glm::vec4(model->attrib.vertices[3*idx.vertex_index + 0],
-                                                 model->attrib.vertices[3*idx.vertex_index + 1],
-                                                 model->attrib.vertices[3*idx.vertex_index + 2], 1.0);
+                    v[vertex] = glm::vec4(model->attrib.vertices[3*idx.vertex_index + 0], model->attrib.vertices[3*idx.vertex_index + 1], model->attrib.vertices[3*idx.vertex_index + 2], 1.0);
                 }
-                glm::vec4 n = crossproduct(vertices[1]-vertices[0], vertices[2]-vertices[0]);
+                glm::vec4 n = crossproduct(v[1]-v[0], v[2]-v[0]);
                 for (size_t vertex = 0; vertex < 3; ++vertex) {
                     tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
-                    num_triangles_per_vertex[idx.vertex_index] += 1;
-                    vertex_normals[idx.vertex_index] += n;
+                    num_triangles_per_vertex[idx.vertex_index] += 1; vertex_normals[idx.vertex_index] += n;
                 }
             }
         }
         std::vector<size_t> normal_indices(num_vertices, 0);
         for (size_t vertex_index = 0; vertex_index < vertex_normals.size(); ++vertex_index) {
             if (num_triangles_per_vertex[vertex_index] == 0) continue;
-            glm::vec4 n = vertex_normals[vertex_index] / (float)num_triangles_per_vertex[vertex_index];
-            n /= norm(n);
+            glm::vec4 n = vertex_normals[vertex_index] / (float)num_triangles_per_vertex[vertex_index]; n /= norm(n);
             model->attrib.normals.push_back( n.x ); model->attrib.normals.push_back( n.y ); model->attrib.normals.push_back( n.z );
             normal_indices[vertex_index] = (model->attrib.normals.size() / 3) - 1;
         }
         for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
-            size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-            for (size_t triangle = 0; triangle < num_triangles; ++triangle) {
-                unsigned int sgroup_tri = model->shapes[shape].mesh.smoothing_group_ids[triangle];
-                if (sgroup_tri != sgroup) continue;
+            for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
+                if (model->shapes[shape].mesh.smoothing_group_ids[triangle] != sgroup) continue;
                 for (size_t vertex = 0; vertex < 3; ++vertex) {
                     tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
                     model->shapes[shape].mesh.indices[3*triangle + vertex].normal_index = normal_indices[ idx.vertex_index ];
@@ -430,136 +459,37 @@ void ComputeNormals(ObjModel* model) {
 }
 
 void BuildTrianglesAndAddToVirtualScene(ObjModel* model) {
-    GLuint vertex_array_object_id;
-    glGenVertexArrays(1, &vertex_array_object_id);
-    glBindVertexArray(vertex_array_object_id);
-    std::vector<GLuint> indices;
-    std::vector<float>  model_coefficients, normal_coefficients, texture_coefficients;
-
+    GLuint vertex_array_object_id; glGenVertexArrays(1, &vertex_array_object_id); glBindVertexArray(vertex_array_object_id);
+    std::vector<GLuint> indices; std::vector<float> model_coefficients, normal_coefficients, texture_coefficients;
     for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
         size_t first_index = indices.size();
-        size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
-        glm::vec3 bbox_min = glm::vec3(std::numeric_limits<float>::max());
-        glm::vec3 bbox_max = glm::vec3(std::numeric_limits<float>::min());
-
-        for (size_t triangle = 0; triangle < num_triangles; ++triangle) {
+        for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
             for (size_t vertex = 0; vertex < 3; ++vertex) {
-                tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
-                indices.push_back(first_index + 3*triangle + vertex);
-                float vx = model->attrib.vertices[3*idx.vertex_index + 0];
-                float vy = model->attrib.vertices[3*idx.vertex_index + 1];
-                float vz = model->attrib.vertices[3*idx.vertex_index + 2];
-                model_coefficients.push_back(vx); model_coefficients.push_back(vy); model_coefficients.push_back(vz); model_coefficients.push_back(1.0f); 
-
-                bbox_min.x = std::min(bbox_min.x, vx); bbox_min.y = std::min(bbox_min.y, vy); bbox_min.z = std::min(bbox_min.z, vz);
-                bbox_max.x = std::max(bbox_max.x, vx); bbox_max.y = std::max(bbox_max.y, vy); bbox_max.z = std::max(bbox_max.z, vz);
-
-                if ( idx.normal_index != -1 ) {
-                    normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 0]); 
-                    normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 1]); 
-                    normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 2]); 
-                    normal_coefficients.push_back(0.0f); 
-                }
-                if ( idx.texcoord_index != -1 ) {
-                    texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 0]);
-                    texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 1]);
-                }
+                tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex]; indices.push_back(first_index + 3*triangle + vertex);
+                float vx = model->attrib.vertices[3*idx.vertex_index + 0]; float vy = model->attrib.vertices[3*idx.vertex_index + 1]; float vz = model->attrib.vertices[3*idx.vertex_index + 2];
+                model_coefficients.push_back(vx); model_coefficients.push_back(vy); model_coefficients.push_back(vz); model_coefficients.push_back(1.0f);
+                if ( idx.normal_index != -1 ) { normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 0]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 1]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 2]); normal_coefficients.push_back(0.0f); }
+                if ( idx.texcoord_index != -1 ) { texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 0]); texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 1]); }
             }
         }
-        SceneObject theobject;
-        theobject.name           = model->shapes[shape].name;
-        theobject.first_index    = first_index;
-        theobject.num_indices    = indices.size() - first_index;
-        theobject.rendering_mode = GL_TRIANGLES;       
-        theobject.vertex_array_object_id = vertex_array_object_id;
-        theobject.bbox_min = bbox_min;
-        theobject.bbox_max = bbox_max;
-        g_VirtualScene[model->shapes[shape].name] = theobject;
+        SceneObject theobject; theobject.name = model->shapes[shape].name; theobject.first_index = first_index; theobject.num_indices = indices.size() - first_index; theobject.rendering_mode = GL_TRIANGLES; theobject.vertex_array_object_id = vertex_array_object_id; theobject.bbox_min = glm::vec3(-1.0f); theobject.bbox_max = glm::vec3(1.0f); g_VirtualScene[model->shapes[shape].name] = theobject;
     }
-
-    GLuint VBO;
-    glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), model_coefficients.data(), GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(0);
-
-    if ( !normal_coefficients.empty() ) {
-        glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), normal_coefficients.data(), GL_STATIC_DRAW);
-        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(1);
-    }
-    if ( !texture_coefficients.empty() ) {
-        glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), texture_coefficients.data(), GL_STATIC_DRAW);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(2);
-    }
-
-    GLuint indices_id;
-    glGenBuffers(1, &indices_id);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_id);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
-    glBindVertexArray(0);
+    GLuint VBO; glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO); glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), model_coefficients.data(), GL_STATIC_DRAW); glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(0);
+    if ( !normal_coefficients.empty() ) { glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO); glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), normal_coefficients.data(), GL_STATIC_DRAW); glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(1); }
+    if ( !texture_coefficients.empty() ) { glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO); glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), texture_coefficients.data(), GL_STATIC_DRAW); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(2); }
+    GLuint indices_id; glGenBuffers(1, &indices_id); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_id); glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW); glBindVertexArray(0);
 }
 
 void LoadShader(const char* filename, GLuint shader_id) {
-    std::ifstream file;
-    try { file.exceptions(std::ifstream::failbit); file.open(filename); } 
-    catch ( std::exception& e ) { fprintf(stderr, "ERROR: Cannot open file \"%s\".\n", filename); std::exit(EXIT_FAILURE); }
-    std::stringstream shader; shader << file.rdbuf(); std::string str = shader.str();
-    const GLchar* shader_string = str.c_str(); const GLint length = static_cast<GLint>( str.length() );
-    glShaderSource(shader_id, 1, &shader_string, &length); glCompileShader(shader_id);
+    std::ifstream file; try { file.exceptions(std::ifstream::failbit); file.open(filename); } catch ( std::exception& e ) { std::exit(EXIT_FAILURE); }
+    std::stringstream shader; shader << file.rdbuf(); std::string str = shader.str(); const GLchar* shader_string = str.c_str(); const GLint length = static_cast<GLint>( str.length() ); glShaderSource(shader_id, 1, &shader_string, &length); glCompileShader(shader_id);
 }
-
 GLuint LoadShader_Vertex(const char* filename) { GLuint id = glCreateShader(GL_VERTEX_SHADER); LoadShader(filename, id); return id; }
 GLuint LoadShader_Fragment(const char* filename) { GLuint id = glCreateShader(GL_FRAGMENT_SHADER); LoadShader(filename, id); return id; }
-
-GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id) {
-    GLuint program_id = glCreateProgram();
-    glAttachShader(program_id, vertex_shader_id); glAttachShader(program_id, fragment_shader_id); glLinkProgram(program_id);
-    glDeleteShader(vertex_shader_id); glDeleteShader(fragment_shader_id);
-    return program_id;
-}
-
-void FramebufferSizeCallback(GLFWwindow* window, int width, int height) {
-    glViewport(0, 0, width, height); g_ScreenRatio = (float)width / height;
-}
-
-double g_LastCursorPosX, g_LastCursorPosY;
-
-void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) { glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY); g_LeftMouseButtonPressed = true; }
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) g_LeftMouseButtonPressed = false;
-}
-
-void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
-    if (g_LeftMouseButtonPressed) {
-        g_CameraTheta -= 0.01f * (xpos - g_LastCursorPosX);
-        g_CameraPhi   += 0.01f * (ypos - g_LastCursorPosY);
-        float phimax = 3.141592f/2;
-        if (g_CameraPhi > phimax) g_CameraPhi = phimax;
-        if (g_CameraPhi < -phimax) g_CameraPhi = -phimax;
-        g_LastCursorPosX = xpos; g_LastCursorPosY = ypos;
-    }
-}
-
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    g_CameraDistance -= 0.1f*yoffset;
-    if (g_CameraDistance < 0.1f) g_CameraDistance = 0.1f;
-}
-
-void Correcao_KeyCallback(int key, int action, int mod);
-
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod) {
-    Correcao_KeyCallback(key, action, mod);
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window, GL_TRUE);
-
-    // ====================================================================
-    // A TACADA DO GOLF (Aperte ESPAÇO)
-    // ====================================================================
-    if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
-    {
-        float forca = 15.0f;
-        g_BallVelocity = glm::vec4(-sin(g_CameraTheta), 0.0f, -cos(g_CameraTheta), 0.0f) * forca;
-    }
-}
-
-void ErrorCallback(int error, const char* description) { fprintf(stderr, "ERROR: GLFW: %s\n", description); }
+GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id) { GLuint program_id = glCreateProgram(); glAttachShader(program_id, vertex_shader_id); glAttachShader(program_id, fragment_shader_id); glLinkProgram(program_id); glDeleteShader(vertex_shader_id); glDeleteShader(fragment_shader_id); return program_id; }
+void FramebufferSizeCallback(GLFWwindow* window, int width, int height) { glViewport(0, 0, width, height); g_ScreenRatio = (float)width / height; }
+void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) { if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) { glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY); g_LeftMouseButtonPressed = true; } if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) g_LeftMouseButtonPressed = false; }
+void ErrorCallback(int error, const char* description) {}
+void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) { g_CameraDistance -= 0.1f*yoffset; if (g_CameraDistance < 0.1f) g_CameraDistance = 0.1f; }
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode) { if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window, GL_TRUE); }
+void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) { if (g_LeftMouseButtonPressed) { g_CameraTheta -= 0.01f * (xpos - g_LastCursorPosX); g_CameraPhi += 0.01f * (ypos - g_LastCursorPosY); float phimax = 3.141592f/2; if (g_CameraPhi > phimax) g_CameraPhi = phimax; if (g_CameraPhi < -phimax) g_CameraPhi = -phimax; g_LastCursorPosX = xpos; g_LastCursorPosY = ypos; } }
