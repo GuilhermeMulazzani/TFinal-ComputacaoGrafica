@@ -1,0 +1,26 @@
+# Blender MTL File: 'golf_club_and_ball_blender.blend'
+# Material Count: 2
+
+newmtl golf_ball
+Ns 323.999994
+Ka 1.000000 1.000000 1.000000
+Kd 0.800000 0.800000 0.800000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.000000
+d 1.000000
+illum 2
+
+newmtl golf_club
+Ns 225.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.310813 0.310813 0.310813
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Bump golf_textures\\golf_fbx_golf_club_Normal.png
+map_Kd golf_textures\\golf_fbx_golf_club_BaseColor.png
+map_Ns golf_textures\\golf_fbx_golf_club_Roughness.png
+refl golf_textures\\golf_fbx_golf_club_Metallic.png
