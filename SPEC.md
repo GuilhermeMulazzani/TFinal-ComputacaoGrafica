@@ -12,7 +12,7 @@
 ## Detalhes do que será implementado
 
 - **Título do trabalho**: <mark>`Golf it Again!`</mark>
-- **Parágrafo curto descrevendo o que será implementado**: <mark>`<preencher>`</mark>
+- **Parágrafo curto descrevendo o que será implementado**: <mark>`Um simulador de Mini Golf 3D com física baseada em geometria modular plana e uma estética visual que remete ao "Dark Mode" com iluminação Neon. O jogador deve calcular a força e o ângulo da tacada para acertar a bola no buraco com o menor número de tentativas, testando colisões contra paredes e desviando de obstáculos estáticos e aéreos em um ambiente com iluminação dinâmica.`</mark>
 
 ## Especificação visual
 
