@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-// Headers abaixo são específicos de C++
 #include <set>
 #include <map>
 #include <stack>
@@ -24,24 +23,19 @@
 #include <stdexcept>
 #include <algorithm>
 
-// Headers das bibliotecas OpenGL
 #include <glad/glad.h>   
 #include <GLFW/glfw3.h>  
 
-// Headers da biblioteca GLM
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// Headers da biblioteca para carregar modelos obj
 #include <tiny_obj_loader.h>
 #include <stb_image.h>
 
-// Headers locais
 #include "utils.h"
 #include "matrices.h"
 
-// Estrutura do modelo OBJ
 struct ObjModel
 {
     tinyobj::attrib_t                 attrib;
@@ -50,7 +44,7 @@ struct ObjModel
 
     ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true)
     {
-        printf("Carregando objetos do arquivo \"%s\"...\n", filename);
+        printf("A carregar objetos do ficheiro \"%s\"...\n", filename);
         std::string fullpath(filename);
         std::string dirname;
         if (basepath == NULL)
@@ -68,7 +62,17 @@ struct ObjModel
         bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, basepath, triangulate);
 
         if (!err.empty()) fprintf(stderr, "\n%s\n", err.c_str());
-        if (!ret) throw std::runtime_error("Erro ao carregar modelo.");
+        if (!ret) throw std::runtime_error("Erro ao carregar o modelo.");
+
+        for (size_t shape = 0; shape < shapes.size(); ++shape)
+        {
+            if (shapes[shape].name.empty())
+            {
+                fprintf(stderr, "Erro: Objeto sem nome dentro do ficheiro '%s'.\n", filename);
+                throw std::runtime_error("Objeto sem nome.");
+            }
+            printf("- Objeto '%s'\n", shapes[shape].name.c_str());
+        }
         printf("OK.\n");
     }
 };
@@ -117,9 +121,6 @@ float g_AngleX = 0.0f;
 float g_AngleY = 0.0f;
 float g_AngleZ = 0.0f;
 
-// ====================================================================
-// CORREÇÃO ERRO 2: DECLARAÇÃO DAS VARIÁVEIS GLOBAIS DO MOUSE
-// ====================================================================
 bool g_LeftMouseButtonPressed = false;
 double g_LastCursorPosX = 0.0;
 double g_LastCursorPosY = 0.0;
@@ -129,7 +130,7 @@ float g_CameraPhi = 0.4f;
 float g_CameraDistance = 4.5f; 
 
 // ====================================================================
-// VARIÁVEIS MECÂNICAS DO MINI GOLF
+// VARIÁVEIS DO MINI GOLF
 // ====================================================================
 glm::vec4 g_BallPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 glm::vec4 g_BallVelocity = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -159,7 +160,7 @@ int main(int argc, char* argv[])
 {
     if (!glfwInit())
     {
-        fprintf(stderr, "ERROR: glfwInit() failed.\n");
+        fprintf(stderr, "ERRO: glfwInit() falhou.\n");
         std::exit(EXIT_FAILURE);
     }
 
@@ -168,7 +169,7 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Protótipo Parcial", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Trabalho Final CG", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -188,16 +189,32 @@ int main(int argc, char* argv[])
 
     LoadShadersFromFiles();
 
-    LoadTextureImage("../../data/red_brick_diff_1k.jpg");      
-    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); 
+    // ====================================================================
+    // CARREGAMENTO DAS TEXTURAS DA PISTA
+    // ====================================================================
+    LoadTextureImage("../../data/red_brick_diff_1k.jpg");       // ID 0 (Paredes)
+    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg");  // ID 1 (Chão)
 
-    ObjModel spheremodel("../../data/sphere.obj");
+    // ====================================================================
+    // CARREGAMENTO DOS MODELOS
+    // ====================================================================
+    ObjModel planemodel("../../data/plane.obj"); // Para a pista
+    ComputeNormals(&planemodel);
+    BuildTrianglesAndAddToVirtualScene(&planemodel);
+
+    ObjModel spheremodel("../../data/sphere.obj"); // Para o Buraco Escuro
     ComputeNormals(&spheremodel);
     BuildTrianglesAndAddToVirtualScene(&spheremodel);
 
-    ObjModel planemodel("../../data/plane.obj");
-    ComputeNormals(&planemodel);
-    BuildTrianglesAndAddToVirtualScene(&planemodel);
+    // MODELO REAL DO TACO SEPARADO (A apontar para a nova pasta)
+    ObjModel golfClubModel("../../data/taco_golf/taco.obj");
+    ComputeNormals(&golfClubModel);
+    BuildTrianglesAndAddToVirtualScene(&golfClubModel);
+
+    // MODELO REAL DA BOLA SEPARADA (A apontar para a nova pasta)
+    ObjModel golfBallModel("../../data/golf_ball/golf_ball.obj");
+    ComputeNormals(&golfBallModel);
+    BuildTrianglesAndAddToVirtualScene(&golfBallModel);
 
     TextRendering_Init();
 
@@ -240,11 +257,13 @@ int main(int argc, char* argv[])
             if (glm::length(g_BallVelocity) < 0.07f) g_BallVelocity = glm::vec4(0.0f);
             g_BallPosition += g_BallVelocity * deltaTime;
 
+            // Limites das Paredes Físicas
             if (g_BallPosition.x < -1.85f) { g_BallPosition.x = -1.85f; g_BallVelocity.x *= -1.0f; }
             if (g_BallPosition.x >  1.85f) { g_BallPosition.x =  1.85f; g_BallVelocity.x *= -1.0f; }
             if (g_BallPosition.z < -7.85f) { g_BallPosition.z = -7.85f; g_BallVelocity.z *= -1.0f; }
             if (g_BallPosition.z >  1.85f) { g_BallPosition.z =  1.85f; g_BallVelocity.z *= -1.0f; }
 
+            // Detecção do buraco
             float distToHole = glm::distance(glm::vec3(g_BallPosition), glm::vec3(g_HolePosition));
             if (distToHole < g_HoleRadius) 
             {
@@ -288,7 +307,7 @@ int main(int argc, char* argv[])
         #define PLANE  2
 
         // ====================================================================
-        // CORREÇÃO ERRO 1: ADICIONADO DECLARAÇÃO DE glm::mat4 ANTES DE model
+        // RENDERIZAÇÃO
         // ====================================================================
         
         // 1. O Chão da pista
@@ -298,39 +317,36 @@ int main(int argc, char* argv[])
         DrawVirtualObject("the_plane");
 
         // 2. As Paredes Visuais
-        // Parede Esquerda
         model = Matrix_Translate(-2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
 
-        // Parede Direita
         model = Matrix_Translate(2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
 
-        // Parede do Fundo
         model = Matrix_Translate(0.0f, 0.1f, -8.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
 
-        // Parede Inicial
         model = Matrix_Translate(0.0f, 0.1f, 2.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
 
-        // 3. O Buraco
+        // 3. O Buraco (Esfera achatada escura)
         model = Matrix_Translate(g_HolePosition.x, g_HolePosition.y, g_HolePosition.z) * Matrix_Scale(g_HoleRadius, 0.01f, g_HoleRadius);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, SPHERE);
         DrawVirtualObject("the_sphere");
 
-        // 4. A Bola de Golf
-        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(0.18f, 0.18f, 0.18f);
+        // 4. A Bola de Golf Real 
+        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(1.0f, 1.0f, 1.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, SPHERE);
-        DrawVirtualObject("the_sphere");
+        
+        DrawVirtualObject("golf_ball"); 
 
-        // 5. O Taco (Animação de recuo)
+        // 5. O Taco de Golf Real (Animado)
         if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) 
         {
             float back_x = sin(g_CameraTheta);
@@ -338,12 +354,16 @@ int main(int argc, char* argv[])
             float recuo = 0.35f + (g_ShotIntensity / MAX_INTENSITY) * 0.8f; 
             
             glm::vec4 clubPos = g_BallPosition + glm::vec4(back_x, 0.0f, back_z, 0.0f) * recuo;
-            clubPos.y = 0.2f; 
+            clubPos.y = 0.0f; 
 
-            model = Matrix_Translate(clubPos.x, clubPos.y, clubPos.z) * Matrix_Scale(0.05f, 0.5f, 0.05f);
+            model = Matrix_Translate(clubPos.x, clubPos.y, clubPos.z) 
+                  * Matrix_Rotate_Y(g_CameraTheta) 
+                  * Matrix_Scale(1.0f, 1.0f, 1.0f); 
+
             glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
             glUniform1i(g_object_id_uniform, SPHERE);
-            DrawVirtualObject("the_sphere");
+            
+            DrawVirtualObject("rdmobj00");
         }
 
         if (g_IsCharging) {
@@ -352,7 +372,7 @@ int main(int argc, char* argv[])
             TextRendering_PrintString(window, txt, -0.9f, -0.9f, 1.0f);
         }
         if (g_BallInHole) {
-            TextRendering_PrintString(window, "CONCLUIDO! APERTE R PARA RESETAR", -0.4f, 0.0f, 1.0f);
+            TextRendering_PrintString(window, "CONCLUIDO! APERTE R PARA REINICIAR", -0.4f, 0.0f, 1.0f);
         }
 
         TextRendering_ShowFramesPerSecond(window);
@@ -365,11 +385,18 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+// =======================================================================================
+// FUNÇÕES AUXILIARES, CARREGAMENTO DE SHADERS E MOUSE
+// =======================================================================================
+
 void LoadTextureImage(const char* filename) {
     stbi_set_flip_vertically_on_load(true);
     int width, height, channels;
     unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
-    if ( data == NULL ) std::exit(EXIT_FAILURE);
+    if ( data == NULL ) {
+        fprintf(stderr, "ERRO: Nao foi possivel abrir a imagem \"%s\".\n", filename);
+        return; 
+    }
     GLuint texture_id; GLuint sampler_id;
     glGenTextures(1, &texture_id); glGenSamplers(1, &sampler_id);
     glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -385,6 +412,8 @@ void LoadTextureImage(const char* filename) {
 }
 
 void DrawVirtualObject(const char* object_name) {
+    if(g_VirtualScene.find(object_name) == g_VirtualScene.end()) return;
+    
     glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
     glUniform4f(g_bbox_min_uniform, g_VirtualScene[object_name].bbox_min.x, g_VirtualScene[object_name].bbox_min.y, g_VirtualScene[object_name].bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, g_VirtualScene[object_name].bbox_max.x, g_VirtualScene[object_name].bbox_max.y, g_VirtualScene[object_name].bbox_max.z, 1.0f);
@@ -463,16 +492,24 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model) {
     std::vector<GLuint> indices; std::vector<float> model_coefficients, normal_coefficients, texture_coefficients;
     for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
         size_t first_index = indices.size();
+        
+        glm::vec3 bbox_min = glm::vec3(std::numeric_limits<float>::max());
+        glm::vec3 bbox_max = glm::vec3(std::numeric_limits<float>::lowest()); 
+
         for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
             for (size_t vertex = 0; vertex < 3; ++vertex) {
                 tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex]; indices.push_back(first_index + 3*triangle + vertex);
                 float vx = model->attrib.vertices[3*idx.vertex_index + 0]; float vy = model->attrib.vertices[3*idx.vertex_index + 1]; float vz = model->attrib.vertices[3*idx.vertex_index + 2];
                 model_coefficients.push_back(vx); model_coefficients.push_back(vy); model_coefficients.push_back(vz); model_coefficients.push_back(1.0f);
+                
+                bbox_min.x = std::min(bbox_min.x, vx); bbox_min.y = std::min(bbox_min.y, vy); bbox_min.z = std::min(bbox_min.z, vz);
+                bbox_max.x = std::max(bbox_max.x, vx); bbox_max.y = std::max(bbox_max.y, vy); bbox_max.z = std::max(bbox_max.z, vz);
+                
                 if ( idx.normal_index != -1 ) { normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 0]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 1]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 2]); normal_coefficients.push_back(0.0f); }
                 if ( idx.texcoord_index != -1 ) { texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 0]); texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 1]); }
             }
         }
-        SceneObject theobject; theobject.name = model->shapes[shape].name; theobject.first_index = first_index; theobject.num_indices = indices.size() - first_index; theobject.rendering_mode = GL_TRIANGLES; theobject.vertex_array_object_id = vertex_array_object_id; theobject.bbox_min = glm::vec3(-1.0f); theobject.bbox_max = glm::vec3(1.0f); g_VirtualScene[model->shapes[shape].name] = theobject;
+        SceneObject theobject; theobject.name = model->shapes[shape].name; theobject.first_index = first_index; theobject.num_indices = indices.size() - first_index; theobject.rendering_mode = GL_TRIANGLES; theobject.vertex_array_object_id = vertex_array_object_id; theobject.bbox_min = bbox_min; theobject.bbox_max = bbox_max; g_VirtualScene[model->shapes[shape].name] = theobject;
     }
     GLuint VBO; glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO); glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), model_coefficients.data(), GL_STATIC_DRAW); glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(0);
     if ( !normal_coefficients.empty() ) { glGenBuffers(1, &VBO); glBindBuffer(GL_ARRAY_BUFFER, VBO); glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), normal_coefficients.data(), GL_STATIC_DRAW); glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(1); }
