@@ -5,13 +5,11 @@
 //   INF01047 Computação Gráfica e Visualização I
 //               Prof. Eduardo Gastal
 //
-//     CÓDIGO BASE PARA O TRABALHO FINAL - PROTÓTIPO MINI GOLF
-//
+//     CÓDIGO FINAL - MINI GOLF ZIG-ZAG
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-
 #include <set>
 #include <map>
 #include <stack>
@@ -25,9 +23,9 @@
 
 #include <glad/glad.h>   
 #include <GLFW/glfw3.h>  
-
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+#include <glm/vec2.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include <tiny_obj_loader.h>
@@ -36,41 +34,28 @@
 #include "utils.h"
 #include "matrices.h"
 
-struct ObjModel
-{
+struct ObjModel {
     tinyobj::attrib_t                 attrib;
     std::vector<tinyobj::shape_t>     shapes;
     std::vector<tinyobj::material_t>  materials;
 
-    ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true)
-    {
+    ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true) {
         printf("A carregar objetos do ficheiro \"%s\"...\n", filename);
         std::string fullpath(filename);
         std::string dirname;
-        if (basepath == NULL)
-        {
+        if (basepath == NULL) {
             auto i = fullpath.find_last_of("/");
-            if (i != std::string::npos)
-            {
+            if (i != std::string::npos) {
                 dirname = fullpath.substr(0, i+1);
                 basepath = dirname.c_str();
             }
         }
-
-        std::string warn;
-        std::string err;
+        std::string warn, err;
         bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, basepath, triangulate);
-
         if (!err.empty()) fprintf(stderr, "\n%s\n", err.c_str());
         if (!ret) throw std::runtime_error("Erro ao carregar o modelo.");
-
-        for (size_t shape = 0; shape < shapes.size(); ++shape)
-        {
-            if (shapes[shape].name.empty())
-            {
-                fprintf(stderr, "Erro: Objeto sem nome dentro do ficheiro '%s'.\n", filename);
-                throw std::runtime_error("Objeto sem nome.");
-            }
+        for (size_t shape = 0; shape < shapes.size(); ++shape) {
+            if (shapes[shape].name.empty()) throw std::runtime_error("Objeto sem nome.");
             printf("- Objeto '%s'\n", shapes[shape].name.c_str());
         }
         printf("OK.\n");
@@ -102,8 +87,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
-struct SceneObject
-{
+struct SceneObject {
     std::string  name;        
     size_t       first_index; 
     size_t       num_indices; 
@@ -117,10 +101,6 @@ std::map<std::string, SceneObject> g_VirtualScene;
 std::stack<glm::mat4>  g_MatrixStack;
 float g_ScreenRatio = 1.0f;
 
-float g_AngleX = 0.0f;
-float g_AngleY = 0.0f;
-float g_AngleZ = 0.0f;
-
 bool g_LeftMouseButtonPressed = false;
 double g_LastCursorPosX = 0.0;
 double g_LastCursorPosY = 0.0;
@@ -130,22 +110,39 @@ float g_CameraPhi = 0.4f;
 float g_CameraDistance = 4.5f; 
 
 // ====================================================================
-// VARIÁVEIS DO MINI GOLF
+// FÍSICA E PISTA (ZIG-ZAG)
 // ====================================================================
 glm::vec4 g_BallPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 glm::vec4 g_BallVelocity = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+float g_BallRadius = 0.18f;
 
 float g_ShotIntensity = 0.0f;
 bool g_IsCharging = false;
 const float MAX_INTENSITY = 20.0f;
 const float CHARGE_SPEED = 12.0f; 
 
-glm::vec4 g_HolePosition = glm::vec4(0.0f, -0.19f, -6.0f, 1.0f);
+// Buraco no final do Zig-Zag
+glm::vec4 g_HolePosition = glm::vec4(-4.0f, -0.19f, -17.5f, 1.0f);
 float g_HoleRadius = 0.35f;
 bool g_BallInHole = false;
 
-bool g_UsePerspectiveProjection = true;
-bool g_ShowInfoText = true;
+struct Wall { glm::vec2 p1, p2; };
+
+// Mapa Físico 2D da Pista (Visto de Cima)
+std::vector<Wall> g_Walls = {
+    {{ 1.5f,  1.0f}, { 1.5f, -4.0f}}, // Direita reta 1
+    {{-1.5f,  1.0f}, {-1.5f, -4.0f}}, // Esquerda reta 1
+    {{ 1.5f, -4.0f}, {-0.5f, -7.0f}}, // Diagonal dir
+    {{-1.5f, -4.0f}, {-3.5f, -7.0f}}, // Diagonal esq
+    {{-0.5f, -7.0f}, {-0.5f,-11.0f}}, // Reta 2 dir
+    {{-3.5f, -7.0f}, {-3.5f,-11.0f}}, // Reta 2 esq
+    {{-0.5f,-11.0f}, {-2.5f,-14.0f}}, // Diagonal dir 2
+    {{-3.5f,-11.0f}, {-5.5f,-14.0f}}, // Diagonal esq 2
+    {{-2.5f,-14.0f}, {-2.5f,-19.0f}}, // Reta final dir
+    {{-5.5f,-14.0f}, {-5.5f,-19.0f}}, // Reta final esq
+    {{-1.5f,  1.0f}, { 1.5f,  1.0f}}, // Parede de trás
+    {{-5.5f,-19.0f}, {-2.5f,-19.0f}}  // Parede do fundo do buraco
+};
 
 GLuint g_GpuProgramID = 0;
 GLint g_model_uniform;
@@ -158,23 +155,15 @@ GLuint g_NumLoadedTextures = 0;
 
 int main(int argc, char* argv[])
 {
-    if (!glfwInit())
-    {
-        fprintf(stderr, "ERRO: glfwInit() falhou.\n");
-        std::exit(EXIT_FAILURE);
-    }
+    if (!glfwInit()) std::exit(EXIT_FAILURE);
 
     glfwSetErrorCallback(ErrorCallback);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Trabalho Final CG", NULL, NULL);
-    if (!window)
-    {
-        glfwTerminate();
-        std::exit(EXIT_FAILURE);
-    }
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - ZigZag & Physics", NULL, NULL);
+    if (!window) { glfwTerminate(); std::exit(EXIT_FAILURE); }
 
     glfwSetKeyCallback(window, KeyCallback);
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
@@ -183,35 +172,33 @@ int main(int argc, char* argv[])
 
     glfwMakeContextCurrent(window);
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
-
     glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
     FramebufferSizeCallback(window, 800, 600); 
 
     LoadShadersFromFiles();
 
     // ====================================================================
-    // CARREGAMENTO DAS TEXTURAS DA PISTA
+    // CARREGAMENTO DE TEXTURAS (ÍNDICES 0 a 3)
     // ====================================================================
-    LoadTextureImage("../../data/red_brick_diff_1k.jpg");       // ID 0 (Paredes)
-    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg");  // ID 1 (Chão)
+    LoadTextureImage("../../data/red_brick_diff_1k.jpg");       // 0: Paredes
+    LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg");  // 1: Chão
+    
+    // Troque para o nome correto das texturas da sua bola e do taco
+    LoadTextureImage("../../data/golf_ball/textures/golf_ball_Albedo.png");    // 2: Bola
+    LoadTextureImage("../../data/taco_golf/thumbnail.jpg");     // 3: Taco
 
-    // ====================================================================
-    // CARREGAMENTO DOS MODELOS
-    // ====================================================================
-    ObjModel planemodel("../../data/plane.obj"); // Para a pista
+    ObjModel planemodel("../../data/plane.obj");
     ComputeNormals(&planemodel);
     BuildTrianglesAndAddToVirtualScene(&planemodel);
 
-    ObjModel spheremodel("../../data/sphere.obj"); // Para o Buraco Escuro
+    ObjModel spheremodel("../../data/sphere.obj");
     ComputeNormals(&spheremodel);
     BuildTrianglesAndAddToVirtualScene(&spheremodel);
 
-    // MODELO REAL DO TACO SEPARADO (A apontar para a nova pasta)
-    ObjModel golfClubModel("../../data/taco_golf/taco.obj");
+    ObjModel golfClubModel("../../data/taco_golf/model.obj");
     ComputeNormals(&golfClubModel);
     BuildTrianglesAndAddToVirtualScene(&golfClubModel);
 
-    // MODELO REAL DA BOLA SEPARADA (A apontar para a nova pasta)
     ObjModel golfBallModel("../../data/golf_ball/golf_ball.obj");
     ComputeNormals(&golfBallModel);
     BuildTrianglesAndAddToVirtualScene(&golfBallModel);
@@ -230,18 +217,16 @@ int main(int argc, char* argv[])
         float deltaTime = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
 
-        if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) 
-        {
-            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) 
-            {
+        // ====================================================================
+        // CONTROLE DA TACADA
+        // ====================================================================
+        if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) {
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
                 g_IsCharging = true;
                 g_ShotIntensity += CHARGE_SPEED * deltaTime;
                 if (g_ShotIntensity > MAX_INTENSITY) g_ShotIntensity = MAX_INTENSITY;
-            } 
-            else 
-            {
-                if (g_IsCharging) 
-                {
+            } else {
+                if (g_IsCharging) {
                     float dir_x = -sin(g_CameraTheta);
                     float dir_z = -cos(g_CameraTheta);
                     g_BallVelocity = glm::vec4(dir_x, 0.0f, dir_z, 0.0f) * g_ShotIntensity;
@@ -251,144 +236,231 @@ int main(int argc, char* argv[])
             }
         }
 
-        if (!g_BallInHole) 
-        {
-            g_BallVelocity -= g_BallVelocity * 1.3f * deltaTime; 
+        // ====================================================================
+        // FÍSICA: BURACO E PAREDES
+        // ====================================================================
+        if (!g_BallInHole) {
+            // Atrito na pista
+            g_BallVelocity -= g_BallVelocity * 1.0f * deltaTime; 
             if (glm::length(g_BallVelocity) < 0.07f) g_BallVelocity = glm::vec4(0.0f);
-            g_BallPosition += g_BallVelocity * deltaTime;
+            
+            glm::vec4 nextPos = g_BallPosition + g_BallVelocity * deltaTime;
 
-            // Limites das Paredes Físicas
-            if (g_BallPosition.x < -1.85f) { g_BallPosition.x = -1.85f; g_BallVelocity.x *= -1.0f; }
-            if (g_BallPosition.x >  1.85f) { g_BallPosition.x =  1.85f; g_BallVelocity.x *= -1.0f; }
-            if (g_BallPosition.z < -7.85f) { g_BallPosition.z = -7.85f; g_BallVelocity.z *= -1.0f; }
-            if (g_BallPosition.z >  1.85f) { g_BallPosition.z =  1.85f; g_BallVelocity.z *= -1.0f; }
+            // Colisão com as Paredes do Zig-Zag
+            for (auto& w : g_Walls) {
+                glm::vec2 ab = w.p2 - w.p1;
+                glm::vec2 ac = glm::vec2(nextPos.x, nextPos.z) - w.p1;
+                float t = glm::dot(ac, ab) / glm::dot(ab, ab);
+                t = glm::clamp(t, 0.0f, 1.0f);
+                glm::vec2 closest = w.p1 + t * ab;
+                glm::vec2 diff = glm::vec2(nextPos.x, nextPos.z) - closest;
+                float dist = glm::length(diff);
+                
+                if (dist < g_BallRadius) {
+                    glm::vec2 n = diff / dist; 
+                    nextPos.x += n.x * (g_BallRadius - dist);
+                    nextPos.z += n.y * (g_BallRadius - dist);
+                    
+                    glm::vec2 v(g_BallVelocity.x, g_BallVelocity.z);
+                    float v_dot_n = glm::dot(v, n);
+                    if (v_dot_n < 0.0f) {
+                        v = v - 1.5f * v_dot_n * n; // Rebote
+                        g_BallVelocity.x = v.x;
+                        g_BallVelocity.z = v.y;
+                    }
+                }
+            }
+            g_BallPosition = nextPos;
 
-            // Detecção do buraco
-            float distToHole = glm::distance(glm::vec3(g_BallPosition), glm::vec3(g_HolePosition));
-            if (distToHole < g_HoleRadius) 
-            {
-                g_BallInHole = true;
-                g_BallVelocity = glm::vec4(0.0f);
-                g_BallPosition = g_HolePosition; 
-                g_BallPosition.y = -0.4f; 
+            // FÍSICA REALISTA DO BURACO
+            float distToHole = glm::distance(glm::vec2(g_BallPosition.x, g_BallPosition.z), glm::vec2(g_HolePosition.x, g_HolePosition.z));
+            float speed = glm::length(g_BallVelocity);
+            
+            // Só cai se estiver no centro do buraco E com velocidade baixa
+            if (distToHole < g_HoleRadius * 0.4f && speed < 3.0f) {
+                g_BallInHole = true; // Inicia a animação de queda
+            } else if (distToHole < g_HoleRadius && speed < 0.8f) {
+                // Fica "balançando" na borda se estiver quase parando
+                g_BallVelocity -= g_BallVelocity * 3.0f * deltaTime; // Freia abruptamente
+            }
+            
+        } else {
+            // Animação da bola caindo (gravidade)
+            g_BallPosition.y -= 1.0f * deltaTime; // Cai no eixo Y
+            g_BallVelocity = glm::vec4(0.0f);     // Remove movimento horizontal
+            if (g_BallPosition.y < -0.3f) {       // Fundo do buraco
+                g_BallPosition.y = -0.3f;
             }
         }
 
-        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) 
-        {
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
             g_BallPosition = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
             g_BallVelocity = glm::vec4(0.0f);
             g_BallInHole = false;
         }
 
+        // ====================================================================
+        // SISTEMA DE OCLUSÃO DA CÂMERA (Bate na parede e aproxima)
+        // ====================================================================
+        float ideal_r = g_CameraDistance;
+        float cam_y = ideal_r * sin(g_CameraPhi);
+        float cam_z = ideal_r * cos(g_CameraPhi) * cos(g_CameraTheta);
+        float cam_x = ideal_r * cos(g_CameraPhi) * sin(g_CameraTheta);
+
+        glm::vec4 camera_lookat  = g_BallPosition; 
+        if(g_BallInHole) camera_lookat.y = -0.2f;
+
+        glm::vec4 ideal_cam_pos = g_BallPosition + glm::vec4(cam_x, cam_y, cam_z, 0.0f);
+
+        float max_dist = ideal_r;
+        glm::vec2 ray_origin(g_BallPosition.x, g_BallPosition.z);
+        glm::vec2 ray_dir(ideal_cam_pos.x - g_BallPosition.x, ideal_cam_pos.z - g_BallPosition.z);
+        
+        float ray_len = glm::length(ray_dir);
+        if (ray_len > 0.001f) {
+            ray_dir /= ray_len; 
+            for (auto& w : g_Walls) {
+                glm::vec2 v1 = ray_origin - w.p1;
+                glm::vec2 v2 = w.p2 - w.p1;
+                glm::vec2 v3 = glm::vec2(-ray_dir.y, ray_dir.x);
+                float dot = glm::dot(v2, v3);
+                if (std::abs(dot) < 0.00001f) continue;
+                
+                float t1 = (v2.x * v1.y - v2.y * v1.x) / dot;
+                float t2 = glm::dot(v1, v3) / dot;
+                
+                if (t1 >= 0.0f && t1 <= max_dist && t2 >= 0.0f && t2 <= 1.0f) {
+                    max_dist = t1; 
+                }
+            }
+        }
+        
+        float actual_dist = std::max(0.4f, max_dist - 0.2f);
+        glm::vec4 final_cam_pos = g_BallPosition;
+        final_cam_pos.x += ray_dir.x * actual_dist;
+        final_cam_pos.y += cam_y * (actual_dist / ideal_r); 
+        final_cam_pos.z += ray_dir.y * actual_dist;
+
+        glm::mat4 view = Matrix_Camera_View(final_cam_pos, camera_lookat - final_cam_pos, glm::vec4(0.0f,1.0f,0.0f,0.0f));
+        glm::mat4 projection = Matrix_Perspective(3.141592 / 3.0f, g_ScreenRatio, -0.1f, -50.0f);
+
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f); 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glUseProgram(g_GpuProgramID);
 
-        float r = g_CameraDistance;
-        float y = r*sin(g_CameraPhi);
-        float z = r*cos(g_CameraPhi)*cos(g_CameraTheta);
-        float x = r*cos(g_CameraPhi)*sin(g_CameraTheta);
+        glUniformMatrix4fv(g_view_uniform, 1 , GL_FALSE , glm::value_ptr(view));
+        glUniformMatrix4fv(g_projection_uniform, 1 , GL_FALSE , glm::value_ptr(projection));
 
-        glm::vec4 camera_lookat_l  = g_BallPosition; 
-        if(g_BallInHole) camera_lookat_l.y = -0.2f;
-
-        glm::vec4 camera_position_c  = g_BallPosition + glm::vec4(x,y,z,0.0f); 
-        glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; 
-        glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); 
-
-        glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
-        glm::mat4 projection = Matrix_Perspective(3.141592 / 3.0f, g_ScreenRatio, -0.1f, -50.0f);
-
-        glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
-        glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
-
-        #define SPHERE 0
-        #define PLANE  2
+        #define WALL  0
+        #define FLOOR 1
+        #define BALL  2
+        #define CLUB  3
 
         // ====================================================================
-        // RENDERIZAÇÃO
+        // RENDERIZAÇÃO DA PISTA
         // ====================================================================
+        glUniform1i(g_object_id_uniform, FLOOR);
+        glm::mat4 model;
         
-        // 1. O Chão da pista
-        glm::mat4 model = Matrix_Translate(0.0f, -0.2f, -3.0f) * Matrix_Scale(2.0f, 1.0f, 5.0f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, PLANE);
-        DrawVirtualObject("the_plane");
-
-        // 2. As Paredes Visuais
-        model = Matrix_Translate(-2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
+        model = Matrix_Translate(0.0f, -0.2f, -1.5f) * Matrix_Scale(1.5f, 1.0f, 2.5f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
-
-        model = Matrix_Translate(2.0f, 0.1f, -3.0f) * Matrix_Rotate_Z(1.5708f) * Matrix_Scale(0.3f, 1.0f, 5.0f);
+        model = Matrix_Translate(-1.0f, -0.2f, -5.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.5f, 1.0f, 2.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
-
-        model = Matrix_Translate(0.0f, 0.1f, -8.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
+        model = Matrix_Translate(-2.0f, -0.2f, -9.0f) * Matrix_Scale(1.5f, 1.0f, 2.0f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+        model = Matrix_Translate(-3.0f, -0.2f, -12.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.5f, 1.0f, 2.0f);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        DrawVirtualObject("the_plane");
+        model = Matrix_Translate(-4.0f, -0.2f, -16.5f) * Matrix_Scale(1.5f, 1.0f, 2.5f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("the_plane");
 
-        model = Matrix_Translate(0.0f, 0.1f, 2.0f) * Matrix_Rotate_X(1.5708f) * Matrix_Scale(2.0f, 1.0f, 0.3f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
+        // Paredes
+        glUniform1i(g_object_id_uniform, WALL);
+        for (auto& w : g_Walls) {
+            float wall_len = glm::distance(w.p1, w.p2);
+            float cx = (w.p1.x + w.p2.x) * 0.5f;
+            float cz = (w.p1.y + w.p2.y) * 0.5f; 
+            float angle = atan2(w.p1.x - w.p2.x, w.p1.y - w.p2.y);
 
-        // 3. O Buraco (Esfera achatada escura)
+            model = Matrix_Translate(cx, 0.1f, cz) 
+                  * Matrix_Rotate_Y(angle)
+                  * Matrix_Rotate_Z(1.5708f) 
+                  * Matrix_Scale(0.3f, 1.0f, wall_len * 0.5f);
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+            DrawVirtualObject("the_plane");
+        }
+
+        // Buraco (Usa a textura do chão escurecida ou apenas uma cor no shader)
+        glUniform1i(g_object_id_uniform, FLOOR);
         model = Matrix_Translate(g_HolePosition.x, g_HolePosition.y, g_HolePosition.z) * Matrix_Scale(g_HoleRadius, 0.01f, g_HoleRadius);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, SPHERE);
         DrawVirtualObject("the_sphere");
 
-        // 4. A Bola de Golf Real 
-        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(1.0f, 1.0f, 1.0f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, SPHERE);
+        // ====================================================================
+        // RENDERIZAÇÃO: BOLA E TACO (COM TEXTURA)
+        // ====================================================================
         
+        // BOLA (Calcula tamanho automaticamente com base na malha)
+        glUniform1i(g_object_id_uniform, BALL);
+        float ball_scale = 1.0f;
+        if(g_VirtualScene.count("golf_ball")) {
+            glm::vec3 sz = g_VirtualScene["golf_ball"].bbox_max - g_VirtualScene["golf_ball"].bbox_min;
+            float max_dim = std::max({sz.x, sz.y, sz.z});
+            if (max_dim > 0) ball_scale = (g_BallRadius * 2.0f) / max_dim;
+        }
+
+        model = Matrix_Translate(g_BallPosition.x, g_BallPosition.y, g_BallPosition.z) * Matrix_Scale(ball_scale, ball_scale, ball_scale);
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         DrawVirtualObject("golf_ball"); 
 
-        // 5. O Taco de Golf Real (Animado)
+        // TACO (Alinhamento corrigido!)
+        glUniform1i(g_object_id_uniform, CLUB);
         if (!g_BallInHole && glm::length(g_BallVelocity) == 0.0f) 
         {
+            float club_scale = 1.0f;
+            if(g_VirtualScene.count("rdmobj00")) {
+                glm::vec3 sz = g_VirtualScene["rdmobj00"].bbox_max - g_VirtualScene["rdmobj00"].bbox_min;
+                float max_dim = std::max({sz.x, sz.y, sz.z});
+                if (max_dim > 0) club_scale = 1.2f / max_dim; 
+            }
+
             float back_x = sin(g_CameraTheta);
             float back_z = cos(g_CameraTheta);
-            float recuo = 0.35f + (g_ShotIntensity / MAX_INTENSITY) * 0.8f; 
+            float recuo = g_BallRadius + 0.05f + (g_ShotIntensity / MAX_INTENSITY) * 0.8f; 
             
             glm::vec4 clubPos = g_BallPosition + glm::vec4(back_x, 0.0f, back_z, 0.0f) * recuo;
             clubPos.y = 0.0f; 
 
+            // Deixa o taco "em pé" e rotacionado para a bola
             model = Matrix_Translate(clubPos.x, clubPos.y, clubPos.z) 
                   * Matrix_Rotate_Y(g_CameraTheta) 
-                  * Matrix_Scale(1.0f, 1.0f, 1.0f); 
+                  * Matrix_Rotate_X(-1.5708f) // <-- GIRA 90 GRAUS PARA DEIXAR RETO (Altere para 0.0 se ficar deitado)
+                  * Matrix_Rotate_Z(0.0f)    // <-- Ajuste fino da "ponta que bate" (Altere para 1.57 ou 3.14 se a ponta ficar de lado)
+                  * Matrix_Scale(club_scale, club_scale, club_scale); 
 
             glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-            glUniform1i(g_object_id_uniform, SPHERE);
-            
             DrawVirtualObject("rdmobj00");
         }
 
         if (g_IsCharging) {
-            char txt[30];
-            snprintf(txt, 30, "FORCA: %.1f", g_ShotIntensity);
+            char txt[30]; snprintf(txt, 30, "FORCA: %.1f", g_ShotIntensity);
             TextRendering_PrintString(window, txt, -0.9f, -0.9f, 1.0f);
         }
-        if (g_BallInHole) {
-            TextRendering_PrintString(window, "CONCLUIDO! APERTE R PARA REINICIAR", -0.4f, 0.0f, 1.0f);
-        }
+        if (g_BallInHole) TextRendering_PrintString(window, "ENCACAPADA! APERTE R", -0.3f, 0.0f, 1.0f);
 
         TextRendering_ShowFramesPerSecond(window);
-
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
     glfwTerminate();
     return 0;
 }
 
-// =======================================================================================
-// FUNÇÕES AUXILIARES, CARREGAMENTO DE SHADERS E MOUSE
-// =======================================================================================
-
+// ... [MANTER SUAS FUNÇÕES AUXILIARES, LoadTextureImage, LoadShader AQUI] ...
 void LoadTextureImage(const char* filename) {
     stbi_set_flip_vertically_on_load(true);
     int width, height, channels;
@@ -413,7 +485,6 @@ void LoadTextureImage(const char* filename) {
 
 void DrawVirtualObject(const char* object_name) {
     if(g_VirtualScene.find(object_name) == g_VirtualScene.end()) return;
-    
     glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
     glUniform4f(g_bbox_min_uniform, g_VirtualScene[object_name].bbox_min.x, g_VirtualScene[object_name].bbox_min.y, g_VirtualScene[object_name].bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, g_VirtualScene[object_name].bbox_max.x, g_VirtualScene[object_name].bbox_max.y, g_VirtualScene[object_name].bbox_max.z, 1.0f);
@@ -433,9 +504,11 @@ void LoadShadersFromFiles() {
     g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
     glUseProgram(g_GpuProgramID);
+    // Vínculo das Texturas ao Shader
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
+    glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage3"), 3);
     glUseProgram(0);
 }
 
@@ -492,19 +565,15 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model) {
     std::vector<GLuint> indices; std::vector<float> model_coefficients, normal_coefficients, texture_coefficients;
     for (size_t shape = 0; shape < model->shapes.size(); ++shape) {
         size_t first_index = indices.size();
-        
         glm::vec3 bbox_min = glm::vec3(std::numeric_limits<float>::max());
         glm::vec3 bbox_max = glm::vec3(std::numeric_limits<float>::lowest()); 
-
         for (size_t triangle = 0; triangle < model->shapes[shape].mesh.num_face_vertices.size(); ++triangle) {
             for (size_t vertex = 0; vertex < 3; ++vertex) {
                 tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex]; indices.push_back(first_index + 3*triangle + vertex);
                 float vx = model->attrib.vertices[3*idx.vertex_index + 0]; float vy = model->attrib.vertices[3*idx.vertex_index + 1]; float vz = model->attrib.vertices[3*idx.vertex_index + 2];
                 model_coefficients.push_back(vx); model_coefficients.push_back(vy); model_coefficients.push_back(vz); model_coefficients.push_back(1.0f);
-                
                 bbox_min.x = std::min(bbox_min.x, vx); bbox_min.y = std::min(bbox_min.y, vy); bbox_min.z = std::min(bbox_min.z, vz);
                 bbox_max.x = std::max(bbox_max.x, vx); bbox_max.y = std::max(bbox_max.y, vy); bbox_max.z = std::max(bbox_max.z, vz);
-                
                 if ( idx.normal_index != -1 ) { normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 0]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 1]); normal_coefficients.push_back(model->attrib.normals[3*idx.normal_index + 2]); normal_coefficients.push_back(0.0f); }
                 if ( idx.texcoord_index != -1 ) { texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 0]); texture_coefficients.push_back(model->attrib.texcoords[2*idx.texcoord_index + 1]); }
             }
