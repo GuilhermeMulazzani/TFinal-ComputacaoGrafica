@@ -120,7 +120,7 @@ void TextRendering_Init()
     GLuint textureunit = 31;
     glActiveTexture(GL_TEXTURE0 + textureunit);
     glBindTexture(GL_TEXTURE_2D, texttexture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, dejavufont.tex_width, dejavufont.tex_height, 0, GL_RED, GL_UNSIGNED_BYTE, dejavufont.tex_data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (GLsizei)dejavufont.tex_width, (GLsizei)dejavufont.tex_height, 0, GL_RED, GL_UNSIGNED_BYTE, dejavufont.tex_data);
     glBindSampler(textureunit, sampler);
     glCheckError();
 

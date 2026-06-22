@@ -14,7 +14,7 @@ set(SOURCES
   src/glad.c
 )
 
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.10.0)
 
 project(LAB_FCG VERSION 1.0.0)
 
@@ -100,6 +100,8 @@ if(WIN32)
   message(STATUS "LIBGLFW = ${LIBGLFW}")
 
   target_link_libraries(${EXECUTABLE_NAME} ${LIBGLFW} gdi32 opengl32)
+  
+  set_target_properties(${EXECUTABLE_NAME} PROPERTIES LINK_FLAGS "/NODEFAULTLIB:MSVCRT")
 
 elseif(UNIX)
 
@@ -128,5 +130,6 @@ elseif(UNIX)
     ${X11_Xcursor_LIB}
     ${X11_Xinerama_LIB}
   )
+  set_target_properties(${EXECUTABLE_NAME} PROPERTIES LINK_FLAGS "/NODEFAULTLIB:MSVCRT")
 
 endif()
