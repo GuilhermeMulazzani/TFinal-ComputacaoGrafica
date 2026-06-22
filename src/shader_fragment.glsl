@@ -19,6 +19,9 @@ uniform mat4 projection;
 
 uniform int object_id;
 
+// --- NOVA UNIFORM: Posição da Bola (recebida do main.cpp) ---
+uniform vec4 ball_position;
+
 uniform vec4 bbox_min;
 uniform vec4 bbox_max;
 
@@ -59,7 +62,10 @@ void main()
 
     vec4 p = position_world;
     vec4 n = normalize(normal);
-    vec4 l = normalize(vec4(1.0, 1.0, 0.5, 0.0)); 
+    
+    // --- VETOR DA LUZ (Aponta do fragmento atual para a bola) ---
+    vec4 l = normalize(ball_position - p);      
+    
     vec4 v = normalize(camera_position - p);      
     vec4 r = -l + 2.0 * dot(n, l) * n;            
 
@@ -80,10 +86,8 @@ void main()
     else if ( object_id == FLOOR ) {
         // Puxa a textura quadriculada normal
         Kd = texture(TextureImage1, vec2(U * 8.0, V * 16.0)).rgb;
-        
         // Aplica um tom de grama sintética verde (diminui o vermelho e o azul, destaca o verde)
         Kd = Kd * vec3(0.3, 0.85, 0.3); 
-        
         Ks = vec3(0.05); 
         Ka = Kd * 0.3; 
         q = 5.0;
@@ -110,18 +114,36 @@ void main()
         Ks = vec3(0.7); Ka = Kd * 0.2; q = 64.0;
     }
 
-    // MODELO DE ILUMINAÇÃO DE PHONG
-    vec3 I  = vec3(1.0, 1.0, 1.0); 
-    vec3 Ia = vec3(1.0, 1.0, 1.0); 
+    // ==========================================================
+    // MODELO DE ILUMINAÇÃO (DARK MODE NEON + POINT LIGHT)
+    // ==========================================================
+    
+    // 1. Iluminação Global Ambient (Fundo Roxo Neon)
+    vec3 ambient_color = vec3(0.15, 0.05, 0.30); 
+    vec3 ambient_term = Kd * ambient_color; 
 
-    vec3 ambient_term = Ka * Ia;
+    // 2. Iluminação Local Difusa e Especular (Bola emitindo luz)
+    vec3 light_color = vec3(0.9, 0.7, 1.0); // Cor brilhante da luz que a bola emite
     float lambert = max(0.0, dot(n, l));
-    vec3 diffuse_term = Kd * I * lambert;
-    vec3 specular_term = Ks * I * pow(max(0.0, dot(r, v)), q);
+    
+    // 3. Atenuação da Luz (diminui conforme a distância da bola)
+    float dist_light = length(ball_position - p);
+    float attenuation = 1.0 / (1.0 + 0.5 * dist_light + 0.2 * (dist_light * dist_light));
+
+    vec3 diffuse_term = Kd * light_color * lambert * attenuation;
+    vec3 specular_term = Ks * light_color * pow(max(0.0, dot(r, v)), q) * attenuation;
     
     if (lambert <= 0.0) { specular_term = vec3(0.0); }
 
+    // Soma das contribuições de luz
     color.rgb = ambient_term + diffuse_term + specular_term;
     color.a = alpha;
+    
+    // 4. A própria bola brilha e ignora sombras (Neon Effect)
+    if (object_id == BALL) {
+        color.rgb = vec3(1.0, 0.8, 1.0); 
+    }
+
+    // Correção Gamma (mantida conforme seu código original)
     color.rgb = pow(color.rgb, vec3(1.0, 1.0, 1.0) / 2.2);
 }

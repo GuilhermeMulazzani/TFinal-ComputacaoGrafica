@@ -194,6 +194,7 @@ GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
 GLuint g_NumLoadedTextures = 0;
+GLint g_ball_position_uniform;
 
 int main(int argc, char* argv[])
 {
@@ -204,7 +205,7 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Bandeira Animada", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Guilherme M Mulazzani", NULL, NULL);
     if (!window) { glfwTerminate(); std::exit(EXIT_FAILURE); }
 
     glfwSetKeyCallback(window, KeyCallback);
@@ -247,6 +248,11 @@ int main(int argc, char* argv[])
     ObjModel flagModel("../../data/bandeira_brasil.obj");
     ComputeNormals(&flagModel);
     BuildTrianglesAndAddToVirtualScene(&flagModel);
+
+    ObjModel blockModel("../../data/cube-parede/cube.obj"); // Ajuste o caminho/nome do arquivo se necessário
+    ComputeNormals(&blockModel);
+    BuildTrianglesAndAddToVirtualScene(&blockModel);
+    std::string cubeObjName = blockModel.shapes[0].name;
 
     TextRendering_Init();
 
@@ -385,7 +391,7 @@ int main(int argc, char* argv[])
         if(g_BallInHole) camera_lookat.y = -0.2f;
 
         glm::vec4 ideal_cam_pos = g_BallPosition + glm::vec4(cam_x, cam_y, cam_z, 0.0f);
-
+        
         float max_dist = ideal_r;
         glm::vec2 ray_origin(g_BallPosition.x, g_BallPosition.z);
         glm::vec2 ray_dir(ideal_cam_pos.x - g_BallPosition.x, ideal_cam_pos.z - g_BallPosition.z);
@@ -397,22 +403,41 @@ int main(int argc, char* argv[])
                 glm::vec2 v1 = ray_origin - w.p1;
                 glm::vec2 v2 = w.p2 - w.p1;
                 glm::vec2 v3 = glm::vec2(-ray_dir.y, ray_dir.x);
-                float dot = glm::dot(v2, v3);
-                if (std::abs(dot) < 0.00001f) continue;
+                float dot_val = glm::dot(v2, v3);
+                if (std::abs(dot_val) < 0.00001f) continue;
                 
-                float t1 = (v2.x * v1.y - v2.y * v1.x) / dot;
-                float t2 = glm::dot(v1, v3) / dot;
+                float t1 = (v2.x * v1.y - v2.y * v1.x) / dot_val;
+                float t2 = glm::dot(v1, v3) / dot_val;
                 
                 if (t1 >= 0.0f && t1 <= max_dist && t2 >= 0.0f && t2 <= 1.0f) {
-                    max_dist = t1; 
+                    
+                    // NOVA LÓGICA: Calcula o lado em que a câmara bateu
+                    glm::vec2 wall_dir = glm::normalize(v2);
+                    glm::vec2 outward_normal = glm::vec2(-wall_dir.y, wall_dir.x);
+                    
+                    float approach_angle = glm::dot(ray_dir, outward_normal);
+                    float margin = 0.05f; // Margem padrão pequena
+                    
+                    // Se a câmara bateu pelas "costas" do bloco (lado que tem a espessura visual de 0.30f)
+                    if (approach_angle < 0.0f) {
+                        // Aumentamos a margem matematicamente para compensar o bloco 3D
+                        margin += 0.30f / std::max(0.2f, std::abs(approach_angle));
+                    }
+                    
+                    // Aplica a margem de segurança ao ponto de paragem
+                    if (t1 - margin < max_dist) {
+                        max_dist = t1 - margin; 
+                    }
                 }
             }
         }
         
-        float actual_dist = std::max(0.4f, max_dist - 0.2f);
+        // Garante limite mínimo para não entrar dentro da bola
+        float actual_dist = std::max(0.12f, max_dist); 
+
         glm::vec4 final_cam_pos = g_BallPosition;
         final_cam_pos.x += ray_dir.x * actual_dist;
-        final_cam_pos.y += cam_y * (actual_dist / ideal_r); 
+        final_cam_pos.y += std::max(0.10f, cam_y * (actual_dist / ideal_r)); 
         final_cam_pos.z += ray_dir.y * actual_dist;
 
         glm::mat4 view = Matrix_Camera_View(final_cam_pos, camera_lookat - final_cam_pos, glm::vec4(0.0f,1.0f,0.0f,0.0f));
@@ -421,6 +446,8 @@ int main(int argc, char* argv[])
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f); 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glUseProgram(g_GpuProgramID);
+
+        glUniform4fv(g_ball_position_uniform, 1, glm::value_ptr(g_BallPosition));
 
         glUniformMatrix4fv(g_view_uniform, 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform, 1 , GL_FALSE , glm::value_ptr(projection));
@@ -463,12 +490,29 @@ int main(int argc, char* argv[])
         DrawVirtualObject("the_plane");
 
         // ====================================================================
-        // RENDERIZAÇÃO DAS PAREDES (WALL)
+        // RENDERIZAÇÃO DAS PAREDES (WALL) COMO BLOCOS
         // ====================================================================
         glUniform1i(g_object_id_uniform, WALL);
         glDisable(GL_CULL_FACE); 
 
+        glm::vec3 cube_pivot(0.0f);
+        glm::vec3 cube_size(1.0f);
+        
+        // Usa a variável em vez do texto fixo
+        if(g_VirtualScene.count(cubeObjName)) {
+            glm::vec3 b_min = g_VirtualScene[cubeObjName].bbox_min;
+            glm::vec3 b_max = g_VirtualScene[cubeObjName].bbox_max;
+            cube_pivot = (b_min + b_max) / 2.0f;
+            cube_size = b_max - b_min;
+            
+            if(cube_size.x == 0) cube_size.x = 1.0f;
+            if(cube_size.y == 0) cube_size.y = 1.0f;
+            if(cube_size.z == 0) cube_size.z = 1.0f;
+        }
+
+        int wall_index = 0;
         for (auto& w : g_Walls) {
+            wall_index++;
             float wall_len = glm::distance(w.p1, w.p2);
             float cx = (w.p1.x + w.p2.x) * 0.5f;
             float cz = (w.p1.y + w.p2.y) * 0.5f; 
@@ -477,62 +521,28 @@ int main(int argc, char* argv[])
             glm::vec2 dir = glm::normalize(w.p2 - w.p1);
             glm::vec2 outward_normal = glm::vec2(-dir.y, dir.x); 
             
-            float height = 0.15f;     
-            float thickness = 0.3f; // Espessura grossa para formar o muro
+            // TRUQUE ANTI-Z-FIGHTING: Encolhe paredes pares em 5mm. 
+            // Imperceptível ao olho, mas impede que as texturas das quinas briguem e pisquem.
+            float shrink = (wall_index % 2 == 0) ? 0.005f : 0.0f; 
+            float height = 0.30f - shrink;    
+            float thickness = 0.30f - shrink; 
 
-            // FIX: A parede interna senta EXATAMENTE na linha de colisão física (cx, cz).
-            float cx_in = cx;
-            float cz_in = cz;
-            
-            // FIX: Afundamos a base da parede para Y = -0.22f. 
-            // Como o chão está em -0.20f, a parede perfura o chão (fechando frestas verticais).
+            // Mantemos o alinhamento com a física intacto
             float base_y = -0.22f; 
+            float center_x = cx + outward_normal.x * (0.30f * 0.5f);
+            float center_z = cz + outward_normal.y * (0.30f * 0.5f);
+            float center_y = base_y + (height * 0.5f);
 
-            // 1. Parede Interna (Encostada na pista)
-            model = Matrix_Translate(cx_in, base_y + height, cz_in) 
+            // Comprimento final: Apenas metade da espessura para preencher a quina sem vazar
+            float final_len = wall_len + (0.30f * 0.5f);
+
+            model = Matrix_Translate(center_x, center_y, center_z) 
                   * Matrix_Rotate_Y(angle)
-                  * Matrix_Rotate_Z(1.5708f) 
-                  * Matrix_Scale(height, 1.0f, wall_len * 0.5f + 0.4f);
+                  * Matrix_Scale(thickness / cube_size.x, height / cube_size.y, final_len / cube_size.z)
+                  * Matrix_Translate(-cube_pivot.x, -cube_pivot.y, -cube_pivot.z);
+                  
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject("the_plane");
-
-            // 2. Parede Externa (Fora da pista)
-            float cx_out = cx_in + outward_normal.x * thickness;
-            float cz_out = cz_in + outward_normal.y * thickness;
-            
-            model = Matrix_Translate(cx_out, base_y + height, cz_out) 
-                  * Matrix_Rotate_Y(angle)
-                  * Matrix_Rotate_Z(1.5708f) 
-                  * Matrix_Scale(height, 1.0f, wall_len * 0.5f + 0.4f);
-            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject("the_plane");
-
-            // 3. Tampa Superior (Fecha o teto do muro)
-            float cx_top = cx_in + outward_normal.x * (thickness * 0.5f);
-            float cz_top = cz_in + outward_normal.y * (thickness * 0.5f);
-            
-            model = Matrix_Translate(cx_top, base_y + (height * 2.0f), cz_top) 
-                  * Matrix_Rotate_Y(angle) 
-                  * Matrix_Scale(thickness * 0.5f, 1.0f, wall_len * 0.5f + 0.4f);
-            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject("the_plane");
-
-            // ==========================================================
-            // 4. PILARES NAS QUINAS (Esconde as falhas de intersecção!)
-            // ==========================================================
-            float pillar_radius = thickness * 0.55f; // Levemente mais largo que a parede
-            
-            // Pilar no ponto inicial da parede (p1)
-            model = Matrix_Translate(w.p1.x, base_y + height, w.p1.y) 
-                  * Matrix_Scale(pillar_radius, height * 1.0f, pillar_radius);
-            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject("Cylinder001");
-
-            // Pilar no ponto final da parede (p2)
-            model = Matrix_Translate(w.p2.x, base_y + height, w.p2.y) 
-                  * Matrix_Scale(pillar_radius, height * 1.0f, pillar_radius);
-            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject("Cylinder001");
+            DrawVirtualObject(cubeObjName.c_str()); 
         }
         
         glEnable(GL_CULL_FACE);
@@ -694,6 +704,7 @@ void LoadShadersFromFiles() {
     g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); 
     g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_ball_position_uniform = glGetUniformLocation(g_GpuProgramID, "ball_position");
     glUseProgram(g_GpuProgramID);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
