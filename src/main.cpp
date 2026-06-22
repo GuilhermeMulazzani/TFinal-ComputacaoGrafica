@@ -35,6 +35,9 @@
 #include "utils.h"
 #include "matrices.h"
 
+// Variável externa do framework da UFRGS para controlar a escala real do texto
+extern float textscale;
+
 // Função robusta para rotacionar a bola em qualquer eixo 
 glm::mat4 Matrix_Rotate_Axis(float angle, glm::vec3 axis) {
     float c = cos(angle);
@@ -646,15 +649,134 @@ int main(int argc, char* argv[])
             glDisable(GL_BLEND);
         }
 
-        char txtStrokes[40]; 
-        snprintf(txtStrokes, 40, "TACADAS: %d", g_Strokes);
-        TextRendering_PrintString(window, txtStrokes, -0.9f, 0.9f, 1.0f);
+        // ====================================================================
+        // RENDERIZAÇÃO DO FUNDO DO PLACAR (Tabela de Madeira em 2D UI)
+        // ====================================================================
+        if (g_BallInHole) {
+            glDisable(GL_DEPTH_TEST); // Desativa a profundidade para desenhar sobre todo o cenário 3D
 
-        if (g_IsCharging) {
-            char txt[30]; snprintf(txt, 30, "FORCA: %.1f", g_ShotIntensity);
-            TextRendering_PrintString(window, txt, -0.9f, -0.9f, 1.0f);
+            // 1. Congela a câmera num plano 2D perfeito (Orthographic View)
+            glm::mat4 hud_view = Matrix_Identity();
+            glm::mat4 hud_proj = Matrix_Identity();
+            glUniformMatrix4fv(g_view_uniform, 1, GL_FALSE, glm::value_ptr(hud_view));
+            glUniformMatrix4fv(g_projection_uniform, 1, GL_FALSE, glm::value_ptr(hud_proj));
+
+            // 2. Traz a "Luz Neon" temporariamente para frente da tela. 
+            // Isso garante que a tabela de madeira não fique escura (já que a bola original está longe, lá no buraco).
+            glm::vec4 hud_light = glm::vec4(0.0f, 0.0f, 2.0f, 1.0f);
+            glUniform4fv(g_ball_position_uniform, 1, glm::value_ptr(hud_light));
+
+            // 3. Define a textura como madeira (WALL) e desenha o plane
+            glUniform1i(g_object_id_uniform, WALL); 
+            
+            // O plano original é deitado (eixo XZ). Matrix_Rotate_X vira ele de frente para a câmera (XY).
+            // Translate e Scale centralizam a placa de madeira exatamentee atrás dos seus textos.
+            glm::mat4 model_hud = Matrix_Translate(0.0f, -0.05f, 0.0f) // Centralizado na tela
+                                * Matrix_Rotate_X(1.5708f) 
+                                * Matrix_Scale(1.35f, 1.0f, 0.55f); // Esticado horizontalmente
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model_hud));
+            DrawVirtualObject("the_plane");
+
+            glEnable(GL_DEPTH_TEST); // Restaura o teste de profundidade para o próximo frame
         }
-        if (g_BallInHole) TextRendering_PrintString(window, "ENCACAPADA! APERTE R", -0.3f, 0.0f, 1.0f);
+
+        // ====================================================================
+        // INTERFACE DO UTILIZADOR (HUD) - TABELA HORIZONTAL GIGANTE E BOLD
+        // ====================================================================
+        const int MAP_PAR = 4; 
+
+        // Lambda auxiliar corrigido para escalar a fonte de verdade e arrumar o Negrito
+        auto PrintBold = [&](GLFWwindow* win, const std::string& text, float x, float y, float scale) {
+            float old_scale = textscale; // Guarda o valor original para não quebrar o FPS
+            textscale = scale;           // AGORA SIM o texto vai ficar do tamanho que queremos!
+
+            // Deslocamento microscópico e estático (1.5 milímetros) para engrossar a letra sem separar
+            float offset = 0.0015f;
+
+            TextRendering_PrintString(win, text, x, y, scale);
+            TextRendering_PrintString(win, text, x + offset, y, scale); 
+            TextRendering_PrintString(win, text, x, y + offset, scale); 
+            TextRendering_PrintString(win, text, x + offset, y + offset, scale); 
+            
+            textscale = old_scale; // Devolve o tamanho ao normal
+        };
+
+        // 1. Contador Principal de Partida (Aumentado para scale 1.5f)
+        char txtInfo[60];
+        snprintf(txtInfo, 60, "PISTA: BURACO 01  |  PAR: %d", MAP_PAR);
+        PrintBold(window, txtInfo, -0.95f, 0.92f, 1.3f);
+
+        char txtStrokes[40];
+        snprintf(txtStrokes, 40, "TACADAS TOTAIS: %d", g_Strokes);
+        PrintBold(window, txtStrokes, -0.95f, 0.78f, 1.8f); // Fonte bem grande e legível no canto
+
+        // 2. Barra de Força Visual Dinâmica (Estilo Carregamento)
+        if (g_IsCharging) {
+            int total_segments = 15;
+            int active_segments = (int)((g_ShotIntensity / MAX_INTENSITY) * total_segments);
+            std::string bar_str = "FORCA: [";
+            for (int i = 0; i < total_segments; i++) {
+                bar_str += (i < active_segments) ? "I" : ".";
+            }
+            bar_str += "] " + std::to_string((int)(g_ShotIntensity * 5)) + "%";
+            PrintBold(window, bar_str, -0.95f, -0.85f, 1.5f);
+        }
+
+        // 3. Sistema de Vitória com Painel de Madeira Tridimensional
+        if (g_BallInHole) {
+            // --- CÁLCULO DO TERMO OFICIAL DE GOLFE ---
+            std::string golf_term = "";
+            if (g_Strokes == 1) {
+                golf_term = "HOLE IN ONE!!!";
+            } else {
+                int score_diff = g_Strokes - MAP_PAR;
+                switch (score_diff) {
+                    case -3: golf_term = "ALBATROSS!"; break;
+                    case -2: golf_term = "EAGLE!!"; break;
+                    case -1: golf_term = "BIRDIE!"; break;
+                    case 0:  golf_term = "PAR!"; break;
+                    case 1:  golf_term = "BOGEY"; break;
+                    case 2:  golf_term = "DOUBLE BOGEY"; break;
+                    case 3:  golf_term = "TRIPLE BOGEY"; break;
+                    default: golf_term = (score_diff > 3) ? "OVER BOGEY" : "FIM DE JOGO!"; break;
+                }
+            }
+
+            // TEXTOS DO PLACAR HORIZONTAL (Alinhamento limpo sem caracteres de desenho)
+            // Título Principal com escala gigante (2.2f)
+            std::string msg_vitoria = "CONCLUIDO: " + golf_term;
+            PrintBold(window, msg_vitoria, -0.50f, 0.32f, 2.2f);
+
+            // Coordenadas horizontais alinhadas por colunas para a tabela limpa
+            float col1_x = -0.55f; // Pista
+            float col2_x = -0.25f; // Par
+            float col3_x =  0.02f; // Suas Tacadas
+            float col4_x =  0.32f; // Resultado
+
+            float row_titles_y = 0.08f;
+            float row_values_y = -0.08f;
+            float text_scale   = 1.5f; // Fonte muito maior para todas as linhas
+
+            // Cabeçalho da Tabela Horizontal
+            PrintBold(window, "BURACO",    col1_x, row_titles_y, text_scale);
+            PrintBold(window, "PAR",       col2_x, row_titles_y, text_scale);
+            PrintBold(window, "TACADAS",   col3_x, row_titles_y, text_scale);
+            PrintBold(window, "STATUS",    col4_x, row_titles_y, text_scale);
+
+            // Valores Reais do Jogador logo abaixo das colunas correspondentes
+            char str_par[10], str_strokes[10];
+            snprintf(str_par, 10, "%d", MAP_PAR);
+            snprintf(str_strokes, 10, "%d", g_Strokes);
+
+            PrintBold(window, "#01",       col1_x + 0.02f, row_values_y, text_scale);
+            PrintBold(window, str_par,     col2_x + 0.02f, row_values_y, text_scale);
+            PrintBold(window, str_strokes, col3_x + 0.05f, row_values_y, text_scale);
+            PrintBold(window, golf_term,   col4_x,         row_values_y, text_scale);
+
+            // Botão de Reinício na parte inferior do painel
+            PrintBold(window, "Pressione 'R' para reiniciar", -0.42f, -0.32f, 1.4f);
+        }
 
         TextRendering_ShowFramesPerSecond(window);
         glfwSwapBuffers(window);

@@ -52,7 +52,7 @@ void main()
     }
 
     // CORTA O EXCESSO DA BOCA DO CILINDRO NO NÍVEL DO CHÃO
-    if (object_id == HOLE && position_world.y > -0.20)
+    if (object_id == HOLE && position_world.y > -0.10)
     {
         discard;
     }
