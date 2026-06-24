@@ -252,10 +252,15 @@ int main(int argc, char* argv[])
     ComputeNormals(&flagModel);
     BuildTrianglesAndAddToVirtualScene(&flagModel);
 
-    ObjModel blockModel("../../data/cube-parede/cube.obj"); // Ajuste o caminho/nome do arquivo se necessário
+    // CARREGANDO O NOVO RETANGULO DO BLENDER PARA CHÃO E PAREDES
+    ObjModel blockModel("../../data/retangulo.obj"); 
     ComputeNormals(&blockModel);
     BuildTrianglesAndAddToVirtualScene(&blockModel);
-    std::string cubeObjName = blockModel.shapes[0].name;
+
+    // CARREGANDO O NOVO BURACO (CILINDRO) DO BLENDER
+    ObjModel holeModel("../../data/buraco.obj"); 
+    ComputeNormals(&holeModel);
+    BuildTrianglesAndAddToVirtualScene(&holeModel);
 
     TextRendering_Init();
 
@@ -354,21 +359,46 @@ int main(int argc, char* argv[])
 
             g_BallPosition = nextPos;
 
+            // ====================================================================
+            // LÓGICA DE FÍSICA MELHORADA DO BURACO (GRAVIDADE E QUEDA)
+            // ====================================================================
             float distToHole = glm::distance(glm::vec2(g_BallPosition.x, g_BallPosition.z), glm::vec2(g_HolePosition.x, g_HolePosition.z));
-            float speed = glm::length(g_BallVelocity);
+            float speed = glm::length(glm::vec3(g_BallVelocity.x, 0.0f, g_BallVelocity.z));
             
-            if (distToHole < g_HoleRadius * 0.4f && speed < 3.0f) {
+            // Condição 1: Passar devagar pela borda ou passar exatamente por cima
+            if ((distToHole < g_HoleRadius * 0.85f && speed < 1.5f) || (distToHole < g_HoleRadius * 0.4f && speed < 4.0f)) {
                 g_BallInHole = true; 
-            } else if (distToHole < g_HoleRadius && speed < 0.8f) {
-                g_BallVelocity -= g_BallVelocity * 3.0f * deltaTime; 
+                // Pequeno pulo inicial apenas para soltar a bola no ar antes de cair
+                g_BallVelocity.y = 0.05f; 
+            } 
+            // Condição 2: Efeito funil/gravidade - atrai a bola para o centro se passar muito perto devagar
+            else if (distToHole < g_HoleRadius * 1.3f && speed < 2.0f) {
+                glm::vec2 pullDir = glm::normalize(glm::vec2(g_HolePosition.x - g_BallPosition.x, g_HolePosition.z - g_BallPosition.z));
+                g_BallVelocity.x += pullDir.x * 2.0f * deltaTime;
+                g_BallVelocity.z += pullDir.y * 2.0f * deltaTime;
             }
             
         } else {
-            g_BallPosition.y -= 1.0f * deltaTime; 
-            g_BallVelocity = glm::vec4(0.0f);     
-            if (g_BallPosition.y < -0.3f) {       
-                g_BallPosition.y = -0.3f;
+            // ====================================================================
+            // ANIMAÇÃO DE QUEDA LIVRE REALISTA DENTRO DO BURACO
+            // ====================================================================
+            
+            // 1. Puxa a bola suavemente para o centro perfeito do buraco durante a queda
+            glm::vec2 toCenter = glm::vec2(g_HolePosition.x - g_BallPosition.x, g_HolePosition.z - g_BallPosition.z);
+            g_BallPosition.x += toCenter.x * 4.0f * deltaTime;
+            g_BallPosition.z += toCenter.y * 4.0f * deltaTime;
+            
+            // 2. Aplica Gravidade para acelerar a queda da bola
+            g_BallVelocity.y -= 5.0f * deltaTime; 
+            g_BallPosition.y += g_BallVelocity.y * deltaTime;
+            
+            // 3. Fundo do buraco (Cilindro)
+            if (g_BallPosition.y < -0.38f) {       
+                g_BallPosition.y = -0.38f;
+                g_BallVelocity = glm::vec4(0.0f);
             }
+            
+            // Bandeira sobe com a animação
             if (g_FlagHeightOffset < 0.0f) {
                 g_FlagHeightOffset += 0.5f * deltaTime; 
             }
@@ -414,16 +444,15 @@ int main(int argc, char* argv[])
                 
                 if (t1 >= 0.0f && t1 <= max_dist && t2 >= 0.0f && t2 <= 1.0f) {
                     
-                    // NOVA LÓGICA: Calcula o lado em que a câmara bateu
+                    // LÓGICA: Calcula o lado em que a câmara bateu
                     glm::vec2 wall_dir = glm::normalize(v2);
                     glm::vec2 outward_normal = glm::vec2(-wall_dir.y, wall_dir.x);
                     
                     float approach_angle = glm::dot(ray_dir, outward_normal);
-                    float margin = 0.05f; // Margem padrão pequena
+                    float margin = 0.05f; 
                     
-                    // Se a câmara bateu pelas "costas" do bloco (lado que tem a espessura visual de 0.30f)
+                    // Se a câmara bateu pelas "costas" do bloco
                     if (approach_angle < 0.0f) {
-                        // Aumentamos a margem matematicamente para compensar o bloco 3D
                         margin += 0.30f / std::max(0.2f, std::abs(approach_angle));
                     }
                     
@@ -464,36 +493,38 @@ int main(int argc, char* argv[])
         #define FLAG_POLE   6
 
         // ====================================================================
-        // RENDERIZAÇÃO DO CHÃO (FLOOR)
+        // RENDERIZAÇÃO DO CHÃO (FLOOR) - AGORA COM retangulo.obj ("Cube")
         // ====================================================================
         glUniform1i(g_object_id_uniform, FLOOR);
         glm::mat4 model;
-        
-        // FIX: Cada placa ganha um desnível de 1 milímetro (Y = -0.200, -0.201...) 
-        // para a placa de vídeo não confundir as camadas (Z-fighting).
-        // FIX: Aumentamos a escala X para 1.6f, garantindo que o chão passe por debaixo da parede.
-        model = Matrix_Translate(0.0f, -0.200f, -1.5f) * Matrix_Scale(1.6f, 1.0f, 2.7f);
+
+        // Peça 1
+        model = Matrix_Translate(0.0f, -0.25f, -1.5f) * Matrix_Scale(1.5f, 0.05f, 2.5f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
-        
-        model = Matrix_Translate(-1.0f, -0.201f, -5.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.6f, 1.0f, 2.2f);
+        DrawVirtualObject("Cube");
+
+        // Peça 2 (Pequeno desnível microscópico no Y para evitar Z-Fighting)
+        model = Matrix_Translate(-1.0f, -0.251f, -5.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.5f, 0.05f, 2.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
-        
-        model = Matrix_Translate(-2.0f, -0.202f, -9.0f) * Matrix_Scale(1.6f, 1.0f, 2.2f);
+        DrawVirtualObject("Cube");
+
+        // Peça 3
+        model = Matrix_Translate(-2.0f, -0.252f, -9.0f) * Matrix_Scale(1.5f, 0.05f, 2.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
-        
-        model = Matrix_Translate(-3.0f, -0.203f, -12.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.6f, 1.0f, 2.2f);
+        DrawVirtualObject("Cube");
+
+        // Peça 4
+        model = Matrix_Translate(-3.0f, -0.253f, -12.5f) * Matrix_Rotate_Y(0.588f) * Matrix_Scale(1.5f, 0.05f, 2.0f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
-        
-        model = Matrix_Translate(-4.0f, -0.204f, -16.5f) * Matrix_Scale(1.6f, 1.0f, 2.7f);
+        DrawVirtualObject("Cube");
+
+        // Peça 5
+        model = Matrix_Translate(-4.0f, -0.254f, -16.5f) * Matrix_Scale(1.5f, 0.05f, 2.5f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("the_plane");
+        DrawVirtualObject("Cube");
 
         // ====================================================================
-        // RENDERIZAÇÃO DAS PAREDES (WALL) COMO BLOCOS
+        // RENDERIZAÇÃO DAS PAREDES (WALL) - AGORA COM retangulo.obj ("Cube")
         // ====================================================================
         glUniform1i(g_object_id_uniform, WALL);
         glDisable(GL_CULL_FACE); 
@@ -501,10 +532,10 @@ int main(int argc, char* argv[])
         glm::vec3 cube_pivot(0.0f);
         glm::vec3 cube_size(1.0f);
         
-        // Usa a variável em vez do texto fixo
-        if(g_VirtualScene.count(cubeObjName)) {
-            glm::vec3 b_min = g_VirtualScene[cubeObjName].bbox_min;
-            glm::vec3 b_max = g_VirtualScene[cubeObjName].bbox_max;
+        // Busca as dimensões do nosso novo retangulo.obj (cujo nome interno é "Cube")
+        if(g_VirtualScene.count("Cube")) {
+            glm::vec3 b_min = g_VirtualScene["Cube"].bbox_min;
+            glm::vec3 b_max = g_VirtualScene["Cube"].bbox_max;
             cube_pivot = (b_min + b_max) / 2.0f;
             cube_size = b_max - b_min;
             
@@ -524,19 +555,15 @@ int main(int argc, char* argv[])
             glm::vec2 dir = glm::normalize(w.p2 - w.p1);
             glm::vec2 outward_normal = glm::vec2(-dir.y, dir.x); 
             
-            // TRUQUE ANTI-Z-FIGHTING: Encolhe paredes pares em 5mm. 
-            // Imperceptível ao olho, mas impede que as texturas das quinas briguem e pisquem.
             float shrink = (wall_index % 2 == 0) ? 0.005f : 0.0f; 
             float height = 0.30f - shrink;    
             float thickness = 0.30f - shrink; 
 
-            // Mantemos o alinhamento com a física intacto
             float base_y = -0.22f; 
             float center_x = cx + outward_normal.x * (0.30f * 0.5f);
             float center_z = cz + outward_normal.y * (0.30f * 0.5f);
             float center_y = base_y + (height * 0.5f);
 
-            // Comprimento final: Apenas metade da espessura para preencher a quina sem vazar
             float final_len = wall_len + (0.30f * 0.5f);
 
             model = Matrix_Translate(center_x, center_y, center_z) 
@@ -545,7 +572,7 @@ int main(int argc, char* argv[])
                   * Matrix_Translate(-cube_pivot.x, -cube_pivot.y, -cube_pivot.z);
                   
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-            DrawVirtualObject(cubeObjName.c_str()); 
+            DrawVirtualObject("Cube"); // Desenha a parede com o retangulo unificado
         }
         
         glEnable(GL_CULL_FACE);
@@ -554,10 +581,11 @@ int main(int argc, char* argv[])
         // RENDERIZAÇÃO DO BURACO (Abaulado e cortado no shader)
         // ====================================================================
         glUniform1i(g_object_id_uniform, HOLE);
-        model = Matrix_Translate(g_HolePosition.x, g_HolePosition.y - 0.25f, g_HolePosition.z) 
+        // Deslocamento ajustado em Y para -0.285f (levemente rebaixado) para não brigar com o chão
+        model = Matrix_Translate(g_HolePosition.x, g_HolePosition.y - 0.285f, g_HolePosition.z) 
               * Matrix_Scale(g_HoleRadius, 0.3f, g_HoleRadius);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        DrawVirtualObject("Cylinder001");
+        DrawVirtualObject("Cylinder"); // Renderiza usando o novo arquivo buraco.obj gerado do Blender
 
         // ====================================================================
         // RENDERIZAÇÃO DA BANDEIRA
