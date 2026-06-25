@@ -19,8 +19,9 @@ uniform mat4 projection;
 
 uniform int object_id;
 
-// --- NOVA UNIFORM: Posição da Bola (recebida do main.cpp) ---
+// --- UNIFORMS DE POSIÇÃO DINÂMICA ---
 uniform vec4 ball_position;
+uniform vec4 hole_position; // <-- NOVO: Posição do buraco recebida do main.cpp
 
 uniform vec4 bbox_min;
 uniform vec4 bbox_max;
@@ -33,6 +34,8 @@ uniform sampler2D TextureImage4; // Buraco (Pedras/Terra)
 uniform sampler2D TextureImage5; // Tecido Bandeira
 uniform sampler2D TextureImage6; // Mastro (Metal)
 
+uniform vec3 ball_color;
+
 out vec4 color;
 
 void main()
@@ -43,10 +46,11 @@ void main()
         discard; 
     }
     
-    // corta chao
+    // CORTA CHAO (Dinâmico para todas as fases)
     if (object_id == FLOOR) {
-        float dist = distance(position_world.xz, vec2(-4.0, -17.5)); // Coordenadas de g_HolePosition
-        if (dist <= 0.10) { // 0.35 é o exato g_HoleRadius
+        // Usa a coordenada real enviada pela CPU em vez de valor fixo
+        float dist = distance(position_world.xz, hole_position.xz); 
+        if (dist <= 0.10) { 
             discard;
         }
     }
@@ -72,7 +76,7 @@ void main()
     float U = texcoords.x;
     float V = texcoords.y;
 
-    vec3 Kd = vec3(0.0);
+    vec3 Kd = vec3(0.0, 0.0, 0.0);
     vec3 Ks = vec3(0.0);
     vec3 Ka = vec3(0.0);
     float q = 1.0;       
@@ -98,8 +102,8 @@ void main()
         Ks = vec3(0.0); Ka = Kd * 0.2; q = 1.0;
     }
     else if ( object_id == BALL ) {
-        Kd = texture(TextureImage2, vec2(U, V)).rgb;
-        Ks = vec3(0.8); Ka = Kd * 0.2; q = 64.0;
+        Kd = texture(TextureImage2, texcoords).rgb * ball_color;
+        Ka = Kd;
     }
     else if ( object_id == CLUB ) {
         Kd = texture(TextureImage3, vec2(U, V)).rgb;
@@ -139,9 +143,10 @@ void main()
     color.rgb = ambient_term + diffuse_term + specular_term;
     color.a = alpha;
     
-    // 4. A própria bola brilha e ignora sombras (Neon Effect)
+    // 4. A própria bola brilha e ignora sombras (Neon Effect Corrigido)
     if (object_id == BALL) {
-        color.rgb = vec3(1.0, 0.8, 1.0); 
+        // Pega a cor certa baseada na textura multiplicada pela cor do menu
+        color.rgb = texture(TextureImage2, texcoords).rgb * ball_color;
     }
 
     // Correção Gamma (mantida conforme seu código original)
