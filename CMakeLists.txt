@@ -12,6 +12,7 @@ set(SOURCES
   src/tiny_obj_loader.cpp
   src/stb_image.cpp
   src/glad.c
+  src/collisions.cpp
 )
 
 cmake_minimum_required(VERSION 3.10.0)
@@ -55,7 +56,8 @@ Por favor, atualize a lista de arquivos fonte no arquivo CMakeLists.txt.")
   endif()
 endforeach()
 
-add_executable(${EXECUTABLE_NAME} ${SOURCES})
+add_executable(${EXECUTABLE_NAME} ${SOURCES}
+  src/collisions.cpp)
 
 target_include_directories(${EXECUTABLE_NAME} BEFORE PRIVATE ${PROJECT_SOURCE_DIR}/include)
 

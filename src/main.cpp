@@ -5,7 +5,7 @@
 //   INF01047 Computação Gráfica e Visualização I
 //             Prof. Eduardo Gastal
 //
-//     CÓDIGO FINAL - MINI GOLF MULTIPLAYER / MULTI-LEVEL / RANDOM MAPS
+//     MINI GOLF MULTI-LEVEL / RANDOM MAPS
 
 #include <cmath>
 #include <cstdio>
@@ -35,20 +35,21 @@
 
 #include "utils.h"
 #include "matrices.h"
+#include "collisions.h"
 
 extern float textscale;
 
 #ifdef _MSC_VER
     #pragma warning(push)
-    #pragma warning(disable: 4244) // Ignora o aviso de conversão int64 para int32
-    #pragma warning(disable: 4267) // Ignora avisos similares de size_t
+    #pragma warning(disable: 4244) 
+    #pragma warning(disable: 4267) 
 #endif
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
 #ifdef _MSC_VER
-    #pragma warning(pop) // Restaura os avisos para o restante do SEU código
+    #pragma warning(pop) 
 #endif
 
 glm::mat4 Matrix_Rotate_Axis(float angle, glm::vec3 axis) {
@@ -62,6 +63,13 @@ glm::mat4 Matrix_Rotate_Axis(float angle, glm::vec3 axis) {
         t*x*z + s*y, t*y*z - s*x, t*z*z + c,   0.0f,
         0.0f,        0.0f,        0.0f,        1.0f
     );
+}
+
+// RECORTA O CHÃO (Cisalhamento)
+glm::mat4 Matrix_Shear_X_Z(float s) {
+    glm::mat4 M = glm::mat4(1.0f);
+    M[2][0] = s; // O eixo X se inclina dependendo da profundidade Z
+    return M;
 }
 
 struct ObjModel {
@@ -122,6 +130,13 @@ float g_ScreenRatio = 1.0f;
 bool g_LeftMouseButtonPressed = false;
 double g_LastCursorPosX = 0.0; double g_LastCursorPosY = 0.0;
 
+// Variáveis de Câmera Livre (FREE CAMERA)
+bool g_UseFreeCamera = false;
+glm::vec4 g_FreeCameraPos = glm::vec4(0.0f, 2.0f, 5.0f, 1.0f);
+float g_FreeCameraTheta = 0.0f;
+float g_FreeCameraPhi = 0.0f;
+bool g_InvertMouseY = false; 
+
 float g_CameraTheta = 0.0f; float g_CameraPhi = 0.4f; float g_CameraDistance = 1.5f; 
 
 float g_CameraSensitivity = 0.01f;
@@ -129,6 +144,7 @@ float g_CameraFOV = 3.141592f / 3.0f;
 bool g_IsRandomMode = false;
 int g_RandomModeTotalHoles = 4;   
 int g_RandomModeCurrentHole = 1;  
+
 // Variáveis Globais do Áudio
 ma_engine g_AudioEngine;
 ma_sound g_MusicBGM;
@@ -137,7 +153,6 @@ ma_sound g_SndQuique;
 ma_sound g_SndCaindo;
 bool g_AudioOK = false;
 
-// Controle de Volume Padrão (50%)
 float g_MusicVolume = 0.5f;
 float g_SFXVolume   = 0.5f;
 
@@ -184,17 +199,31 @@ std::vector<int> g_ScoreHistory;
 std::vector<int> g_ParHistory;
 float g_FlagHeightOffset = -0.4f; 
 
-// ====================================================================
-// ARQUITETURA UNIFICADA DE GEOMETRIA 
-// ====================================================================
-struct Wall { glm::vec2 p1, p2; }; std::vector<Wall> g_Walls;
+std::vector<Wall> g_Walls; 
 struct HillDef { float x, z, radius, height; }; std::vector<HillDef> g_LevelHills;
-struct FloorDef { float cx, cz, sx, sz, y, pitch; }; std::vector<FloorDef> g_LevelFloors;
+
+// A variável 'shear_x' é a nossa tesoura de geometria. Ela inclina o retângulo perfeitamente!
+struct FloorDef { float cx, cz, sx, sz, y, pitch, shear_x; }; std::vector<FloorDef> g_LevelFloors;
+
 struct RampDef { float z_start, z_end, height_start, height_end; }; std::vector<RampDef> g_LevelRamps;
 struct MovingWallDef { int wall_index; float center_x, center_z; float range, speed; bool move_in_x; }; std::vector<MovingWallDef> g_MovingObstacles;
 
 float RandomFloat(float min, float max) {
     return min + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX/(max-min)));
+}
+
+glm::vec3 EvaluateCubicBezier(glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, glm::vec3 p4, float t) {
+    float u = 1.0f - t;
+    float tt = t * t;
+    float uu = u * u;
+    float uuu = uu * u;
+    float ttt = tt * t;
+
+    glm::vec3 p = uuu * p1; 
+    p += 3 * uu * t * p2;   
+    p += 3 * u * tt * p3;   
+    p += ttt * p4;          
+    return p;
 }
 
 void LoadLevel(int level) {
@@ -222,43 +251,38 @@ void LoadLevel(int level) {
             {{ 1.5f,  1.0f}, {-1.5f,  1.0f}}, {{-2.5f,-19.0f}, {-5.5f,-19.0f}},
             {{ 1.5f, -2.0f}, { 0.0f, -2.0f}}, {{-3.5f, -9.0f}, {-1.5f, -9.0f}}  
         };
-        g_LevelFloors.push_back({0.0f, -1.5f, 1.5f, 2.5f, -0.2f, 0.0f});
-        g_LevelFloors.push_back({-1.0f, -5.5f, 2.5f, 1.5f, -0.2f, 0.0f});
-        g_LevelFloors.push_back({-2.0f, -9.0f, 1.5f, 2.0f, -0.2f, 0.0f});
-        g_LevelFloors.push_back({-4.0f, -12.5f, 3.5f, 1.5f, -0.2f, 0.0f});
-        g_LevelFloors.push_back({-4.0f, -16.5f, 1.5f, 2.5f, -0.2f, 0.0f});
+        // Aqui usamos a 'tesoura matemática' (shear_x = 0.666f) nos trechos diagonais. Para nao vazar para fora da "quadra"!
+        g_LevelFloors.push_back({0.0f, -1.5f, 1.5f, 2.5f, -0.2f, 0.0f, 0.0f});
+        g_LevelFloors.push_back({-1.0f, -5.5f, 1.5f, 1.5f, -0.2f, 0.0f, 0.6666667f}); 
+        g_LevelFloors.push_back({-2.0f, -9.0f, 1.5f, 2.0f, -0.2f, 0.0f, 0.0f});
+        g_LevelFloors.push_back({-3.0f, -12.5f, 1.5f, 1.5f, -0.2f, 0.0f, 0.6666667f}); 
+        g_LevelFloors.push_back({-4.0f, -16.5f, 1.5f, 2.5f, -0.2f, 0.0f, 0.0f});
         
     } else if (level == 2) {
         g_BallPosition = glm::vec4(0.0f, -0.12f, 0.0f, 1.0f);
         g_HolePosition = glm::vec4(0.0f, -0.19f, -16.0f, 1.0f);
         
-        // CORREÇÃO 3: Estruturação Correta da Fase 2 (Sincronização Física x Visual)
-        // 1. Início
         g_Walls.push_back({{ 1.5f,  1.0f}, { 1.5f, -5.0f}}); g_Walls.push_back({{-1.5f, -5.0f}, {-1.5f,  1.0f}}); g_Walls.push_back({{ 1.5f,  1.0f}, {-1.5f,  1.0f}});
-        // 2. Rampa Descendo
         g_Walls.push_back({{ 1.5f, -5.0f}, { 1.5f, -8.0f}}); g_Walls.push_back({{-1.5f, -8.0f}, {-1.5f, -5.0f}});
         
-        // 3. O Abismo / Ponte Fina (Fica no centro, e criamos quinas fechadas para não atravessar)
-        g_Walls.push_back({{ 1.5f, -8.0f}, { 1.0f, -8.0f}}); g_Walls.push_back({{-1.5f, -8.0f}, {-1.0f, -8.0f}}); // Fechamento Superior
-        g_Walls.push_back({{ 1.0f, -11.0f}, { 1.5f, -11.0f}}); g_Walls.push_back({{-1.0f, -11.0f}, {-1.5f, -11.0f}}); // Fechamento Inferior
+        g_Walls.push_back({{ 1.5f, -8.0f}, { 1.0f, -8.0f}}); g_Walls.push_back({{-1.5f, -8.0f}, {-1.0f, -8.0f}}); 
+        g_Walls.push_back({{ 1.0f, -11.0f}, { 1.5f, -11.0f}}); g_Walls.push_back({{-1.0f, -11.0f}, {-1.5f, -11.0f}}); 
         
-        // 4. Rampa Subindo
         g_Walls.push_back({{ 1.5f, -11.0f}, { 1.5f, -14.0f}}); g_Walls.push_back({{-1.5f, -14.0f}, {-1.5f, -11.0f}});
-        // 5. Final Platform
-        g_Walls.push_back({{ 1.5f, -14.0f}, { 2.0f, -14.0f}}); g_Walls.push_back({{-1.5f, -14.0f}, {-2.0f, -14.0f}}); // Alarga para 2.0
+        g_Walls.push_back({{ 1.5f, -14.0f}, { 2.0f, -14.0f}}); g_Walls.push_back({{-1.5f, -14.0f}, {-2.0f, -14.0f}}); 
         g_Walls.push_back({{ 2.0f, -14.0f}, { 2.0f, -18.0f}}); g_Walls.push_back({{-2.0f, -18.0f}, {-2.0f, -14.0f}}); 
-        g_Walls.push_back({{ 2.0f, -18.0f}, {-2.0f, -18.0f}}); // Fundo
+        g_Walls.push_back({{ 2.0f, -18.0f}, {-2.0f, -18.0f}}); 
 
         g_LevelRamps.push_back({-5.0f, -8.0f, -0.2f, -0.8f}); 
         g_LevelRamps.push_back({-11.0f, -14.0f, -0.8f, -0.2f});
         
-        g_LevelFloors.push_back({0.0f, -2.0f, 1.5f, 3.0f, -0.2f, 0.0f});
+        g_LevelFloors.push_back({0.0f, -2.0f, 1.5f, 3.0f, -0.2f, 0.0f, 0.0f});
         float d_hyp = sqrt(3.0f*3.0f + 0.6f*0.6f) / 2.0f; float d_pitch = atan2(-0.6f, 3.0f);
-        g_LevelFloors.push_back({0.0f, -6.5f, 1.5f, d_hyp, -0.5f, d_pitch}); 
-        g_LevelFloors.push_back({0.0f, -9.5f, 1.0f, 1.5f, -0.8f, 0.0f}); // Ponte
+        g_LevelFloors.push_back({0.0f, -6.5f, 1.5f, d_hyp, -0.5f, d_pitch, 0.0f}); 
+        g_LevelFloors.push_back({0.0f, -9.5f, 1.0f, 1.5f, -0.8f, 0.0f, 0.0f}); 
         float a_hyp = sqrt(3.0f*3.0f + 0.6f*0.6f) / 2.0f; float a_pitch = atan2(0.6f, 3.0f);
-        g_LevelFloors.push_back({0.0f, -12.5f, 1.5f, a_hyp, -0.5f, a_pitch}); 
-        g_LevelFloors.push_back({0.0f, -16.0f, 2.0f, 2.0f, -0.2f, 0.0f});
+        g_LevelFloors.push_back({0.0f, -12.5f, 1.5f, a_hyp, -0.5f, a_pitch, 0.0f}); 
+        g_LevelFloors.push_back({0.0f, -16.0f, 2.0f, 2.0f, -0.2f, 0.0f, 0.0f});
 
     } else if (level == 3) {
         g_BallPosition = glm::vec4(0.0f, -0.12f, 0.0f, 1.0f);
@@ -276,6 +300,7 @@ void LoadLevel(int level) {
         g_Walls.push_back({{-1.0f, -6.0f}, {-0.95f, -6.0f}}); 
         g_Walls.push_back({{ 1.0f, -6.0f}, { 1.05f, -6.0f}});
         g_Walls.push_back({{-1.0f, -16.0f}, {1.0f, -16.0f}});
+        
         g_MovingObstacles.push_back({(int)g_Walls.size() - 1, 0.0f, -16.0f, 1.1f, 2.3f, true});
 
         float hx = g_HolePosition.x; float hz = g_HolePosition.z;
@@ -283,9 +308,9 @@ void LoadLevel(int level) {
         g_Walls.push_back({{hx - 0.6f, hz - 0.6f}, {hx - 0.6f, hz + 0.4f}}); 
         g_Walls.push_back({{hx + 0.6f, hz - 0.6f}, {hx + 0.6f, hz + 0.4f}}); 
 
-        g_LevelFloors.push_back({0.0f, -3.0f, 2.5f, 5.0f, -0.2f, 0.0f}); 
-        g_LevelFloors.push_back({0.0f, -10.0f, 2.5f, 2.05f, 0.10f, 0.149f});
-        g_LevelFloors.push_back({0.0f, -18.5f, 2.5f, 6.5f, 0.40f, 0.0f}); 
+        g_LevelFloors.push_back({0.0f, -3.0f, 2.5f, 5.0f, -0.2f, 0.0f, 0.0f}); 
+        g_LevelFloors.push_back({0.0f, -10.0f, 2.5f, 2.05f, 0.10f, 0.149f, 0.0f});
+        g_LevelFloors.push_back({0.0f, -18.5f, 2.5f, 6.5f, 0.40f, 0.0f, 0.0f}); 
         
     } else if (level >= 4) {
         g_BallPosition = glm::vec4(0.0f, -0.12f, 0.0f, 1.0f);
@@ -296,7 +321,6 @@ void LoadLevel(int level) {
         int num_sections = (rand() % 3) + 3; 
         for (int i=0; i<num_sections; i++) {
             int type = rand() % 3; 
-            // CORREÇÃO 1: NUNCA gera rampa no primeiro passo!
             if (i == 0) type = 0; 
 
             float length = RandomFloat(5.0f, 10.0f);
@@ -304,7 +328,7 @@ void LoadLevel(int level) {
             if (type == 0 || i == num_sections - 1) { 
                 g_Walls.push_back({{width, z_cursor}, {width, z_cursor - length}});
                 g_Walls.push_back({{-width, z_cursor - length}, {-width, z_cursor}});
-                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, length/2.0f, y_cursor, 0.0f});
+                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, length/2.0f, y_cursor, 0.0f, 0.0f});
                 
                 int obs_type = rand() % 3;
                 if (obs_type == 1 && length > 6.0f) { 
@@ -323,14 +347,14 @@ void LoadLevel(int level) {
                 float next_y = y_cursor + 0.6f;
                 g_Walls.push_back({{width, z_cursor}, {width, z_cursor - length}}); g_Walls.push_back({{-width, z_cursor - length}, {-width, z_cursor}});
                 float pitch = atan2(0.6f, length); float hyp = sqrt(length*length + 0.6f*0.6f);
-                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, hyp/2.0f, y_cursor + 0.3f, pitch});
+                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, hyp/2.0f, y_cursor + 0.3f, pitch, 0.0f});
                 g_LevelRamps.push_back({z_cursor, z_cursor - length, y_cursor, next_y});
                 y_cursor = next_y; z_cursor -= length;
             } else if (type == 2) { 
                 float next_y = y_cursor - 0.6f;
                 g_Walls.push_back({{width, z_cursor}, {width, z_cursor - length}}); g_Walls.push_back({{-width, z_cursor - length}, {-width, z_cursor}});
                 float pitch = atan2(-0.6f, length); float hyp = sqrt(length*length + 0.6f*0.6f);
-                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, hyp/2.0f, y_cursor - 0.3f, pitch});
+                g_LevelFloors.push_back({0.0f, z_cursor - length/2.0f, width, hyp/2.0f, y_cursor - 0.3f, pitch, 0.0f});
                 g_LevelRamps.push_back({z_cursor, z_cursor - length, y_cursor, next_y});
                 y_cursor = next_y; z_cursor -= length;
             }
@@ -348,11 +372,18 @@ void LoadLevel(int level) {
 }
 
 float GetFloorHeight(float x, float z) {
-    float floor_y = -20.0f; // Abismo por padrão. Se estiver fora da pista geométrica, cai!
+    float floor_y = -20.0f; 
     
     for (auto& f : g_LevelFloors) {
-        if (x >= f.cx - f.sx - 0.15f && x <= f.cx + f.sx + 0.15f && z <= f.cz + f.sz + 0.15f && z >= f.cz - f.sz - 0.15f) {
-            float cy = f.y - (z - f.cz) * tan(f.pitch); 
+        float dx = x - f.cx;
+        float dz = z - f.cz;
+        
+        // Aplica o cisalhamento reverso para manter a colisão física perfeita
+        float z_local = dz;
+        float x_local = dx - f.shear_x * z_local;
+        
+        if (x_local >= -f.sx - 0.15f && x_local <= f.sx + 0.15f && z_local <= f.sz + 0.15f && z_local >= -f.sz - 0.15f) {
+            float cy = f.y - z_local * tan(f.pitch); 
             if (cy > floor_y) floor_y = cy; 
         }
     }
@@ -386,7 +417,7 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Fisicas Corrigidas", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Guilherme M. Mulazzani", NULL, NULL);
     if (!window) { glfwTerminate(); std::exit(EXIT_FAILURE); }
 
     glfwSetKeyCallback(window, KeyCallback);
@@ -435,28 +466,20 @@ int main(int argc, char* argv[])
 
     float menuInputCooldown = 0.0f;
     
-    // Inicializa o Áudio e carrega todos os sons ANTES do jogo começar
     if (ma_engine_init(NULL, &g_AudioEngine) == MA_SUCCESS) {
         g_AudioOK = true;
         
-        // Música
         if (ma_sound_init_from_file(&g_AudioEngine, "../../data/musica_ambiente.mp3", 0, NULL, NULL, &g_MusicBGM) == MA_SUCCESS) {
             ma_sound_set_volume(&g_MusicBGM, g_MusicVolume);
             ma_sound_set_looping(&g_MusicBGM, MA_TRUE);
             ma_sound_start(&g_MusicBGM);
         }
-        
-        // Tacada
         if (ma_sound_init_from_file(&g_AudioEngine, "../../data/tacada.wav", 0, NULL, NULL, &g_SndTacada) == MA_SUCCESS) {
             ma_sound_set_volume(&g_SndTacada, g_SFXVolume);
         }
-
-        // Quique na Parede
         if (ma_sound_init_from_file(&g_AudioEngine, "../../data/quique.wav", 0, NULL, NULL, &g_SndQuique) == MA_SUCCESS) {
             ma_sound_set_volume(&g_SndQuique, g_SFXVolume);
         }
-
-        // Som da bola caindo no buraco
         if (ma_sound_init_from_file(&g_AudioEngine, "../../data/bola_caindo.wav", 0, NULL, NULL, &g_SndCaindo) == MA_SUCCESS) {
             ma_sound_set_volume(&g_SndCaindo, g_SFXVolume);
         }
@@ -485,12 +508,11 @@ int main(int argc, char* argv[])
             if (g_CurrentLevel == 0) {
                 PrintBold(window, "MINI GOLF IT AGAIN!", -0.65f, 0.5f, 3.0f);
                 
-                // Todos alinhados em X = -0.4f
                 PrintBold(window, "[ 1 ] - JOGAR", -0.4f, 0.15f, 2.0f);
                 PrintBold(window, "[ 2 ] - OPCOES", -0.4f, -0.05f, 2.0f);
                 PrintBold(window, "[ 3 ] - PERSONALIZAR BOLA", -0.4f, -0.25f, 2.0f);
                 
-                if (g_CampaignFinished) PrintBold(window, "- MODO INFINITO DESBLOQUEADO -", -0.55f, -0.5f, 1.5f);
+                if (g_CampaignFinished) PrintBold(window, "- MODO INFINITO DESBLOQUEADO -", -0.55f, -0.5f, 1.7f);
 
                 if (menuInputCooldown <= 0.0f) {
                     if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) {
@@ -505,19 +527,21 @@ int main(int argc, char* argv[])
                 PrintBold(window, "OPCOES DO SISTEMA", -0.45f, 0.6f, 3.0f);
                 
                 char fovStr[64]; snprintf(fovStr, 64, "FOV da Camera: %.0f graus [ Q / E ]", g_CameraFOV * (180.0f/3.14159f));
-                PrintBold(window, fovStr, -0.5f, 0.2f, 1.5f);
+                PrintBold(window, fovStr, -0.5f, 0.3f, 1.7f);
                 
                 char sensStr[64]; snprintf(sensStr, 64, "Sensibilidade Mouse: %.3f [ Z / C ]", g_CameraSensitivity);
-                PrintBold(window, sensStr, -0.5f, 0.0f, 1.5f);
+                PrintBold(window, sensStr, -0.5f, 0.1f, 1.7f);
 
-                // --- NOVOS CONTROLES DE ÁUDIO ---
                 char musStr[64]; snprintf(musStr, 64, "Volume Musica: %d%% [ U / I ]", (int)(g_MusicVolume * 100));
-                PrintBold(window, musStr, -0.5f, -0.2f, 1.5f);
+                PrintBold(window, musStr, -0.5f, -0.1f, 1.7f);
                 
                 char sfxStr[64]; snprintf(sfxStr, 64, "Volume Efeitos: %d%% [ J / K ]", (int)(g_SFXVolume * 100));
-                PrintBold(window, sfxStr, -0.5f, -0.4f, 1.5f);
+                PrintBold(window, sfxStr, -0.5f, -0.3f, 1.7f);
 
-                PrintBold(window, "[ V ] - VOLTAR", -0.2f, -0.7f, 2.0f);
+                char invStr[64]; snprintf(invStr, 64, "Inverter Eixo Y Mouse: %s [ M ]", g_InvertMouseY ? "ON" : "OFF");
+                PrintBold(window, invStr, -0.5f, -0.5f, 1.7f);
+
+                PrintBold(window, "[ V ] - VOLTAR", -0.2f, -0.8f, 2.0f);
 
                 if (menuInputCooldown <= 0.0f) {
                     if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) { g_CameraFOV -= 0.02f; menuInputCooldown = 0.05f; }
@@ -525,7 +549,6 @@ int main(int argc, char* argv[])
                     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) { g_CameraSensitivity -= 0.001f; menuInputCooldown = 0.05f; }
                     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) { g_CameraSensitivity += 0.001f; menuInputCooldown = 0.05f; }
                     
-                    // Ajuste de Música (U diminui, I aumenta)
                     if (glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS) { 
                         g_MusicVolume -= 0.05f; if(g_MusicVolume < 0.0f) g_MusicVolume = 0.0f; 
                         if(g_AudioOK) ma_sound_set_volume(&g_MusicBGM, g_MusicVolume);
@@ -537,7 +560,6 @@ int main(int argc, char* argv[])
                         menuInputCooldown = 0.05f; 
                     }
                     
-                    // Ajuste de Efeitos Sonoros (J diminui, K aumenta)
                     if (glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS) { 
                         g_SFXVolume -= 0.05f; if(g_SFXVolume < 0.0f) g_SFXVolume = 0.0f; 
                         if(g_AudioOK) { ma_sound_set_volume(&g_SndTacada, g_SFXVolume); ma_sound_set_volume(&g_SndQuique, g_SFXVolume); }
@@ -547,6 +569,11 @@ int main(int argc, char* argv[])
                         g_SFXVolume += 0.05f; if(g_SFXVolume > 1.0f) g_SFXVolume = 1.0f; 
                         if(g_AudioOK) { ma_sound_set_volume(&g_SndTacada, g_SFXVolume); ma_sound_set_volume(&g_SndQuique, g_SFXVolume); }
                         menuInputCooldown = 0.05f; 
+                    }
+
+                    if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS) {
+                        g_InvertMouseY = !g_InvertMouseY;
+                        menuInputCooldown = 0.2f;
                     }
 
                     if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS) { g_CurrentLevel = 0; menuInputCooldown = 0.5f; }
@@ -589,8 +616,6 @@ int main(int argc, char* argv[])
                 
             } else if (g_CurrentLevel == -3) {
                 PrintBold(window, "SELECIONE O MODO DE JOGO", -0.7f, 0.5f, 2.2f);
-                
-                // Todos alinhados em X = -0.6f com escala 1.6f
                 PrintBold(window, "[ 1 ] - MODO CLASSICO (FASES 1-3)", -0.6f, 0.1f, 1.6f);
                 PrintBold(window, "[ 2 ] - MODO RANDOMICO (INFINITO)", -0.6f, -0.1f, 1.6f);
                 PrintBold(window, "[ V ] - VOLTAR", -0.6f, -0.4f, 1.6f);
@@ -603,7 +628,7 @@ int main(int argc, char* argv[])
             } else if (g_CurrentLevel == -4) {
                 PrintBold(window, "CONFIGURAR MODO RANDOMICO", -0.6f, 0.5f, 2.5f);
                 char holesStr[64]; snprintf(holesStr, 64, "QUANTIDADE DE BURACOS: %d", g_RandomModeTotalHoles); PrintBold(window, holesStr, -0.45f, 0.1f, 1.8f);
-                PrintBold(window, "Pressione [ A ] para diminuir ou [ D ] para aumentar", -0.65f, -0.08f, 1.2f);
+                PrintBold(window, "Pressione [ A ] para diminuir ou [ D ] para aumentar", -0.65f, -0.08f, 1.8f);
                 PrintBold(window, "[ ENTER ] - INICIAR PARTIDA", -0.4f, -0.35f, 1.8f); PrintBold(window, "[ V ] - VOLTAR", -0.15f, -0.55f, 1.8f);
 
                 if (menuInputCooldown <= 0.0f) {
@@ -617,13 +642,25 @@ int main(int argc, char* argv[])
         }
 
         for (auto& mo : g_MovingObstacles) {
-            float offset = sin(currentFrameTime * mo.speed) * mo.range; float w_len = 1.0f; 
-            if (mo.move_in_x) { g_Walls[mo.wall_index].p1 = {mo.center_x + offset - w_len, mo.center_z}; g_Walls[mo.wall_index].p2 = {mo.center_x + offset + w_len, mo.center_z}; }
+            float t = (sin(currentFrameTime * mo.speed) + 1.0f) / 2.0f;
+            
+            glm::vec3 p1(mo.center_x - mo.range, 0.0f, mo.center_z);
+            glm::vec3 p2(mo.center_x - mo.range * 0.5f, 0.0f, mo.center_z + 2.0f); 
+            glm::vec3 p3(mo.center_x + mo.range * 0.5f, 0.0f, mo.center_z - 2.0f); 
+            glm::vec3 p4(mo.center_x + mo.range, 0.0f, mo.center_z);
+            
+            glm::vec3 pos = EvaluateCubicBezier(p1, p2, p3, p4, t);
+            
+            float w_len = 1.0f; 
+            if (mo.move_in_x) { 
+                g_Walls[mo.wall_index].p1 = {pos.x - w_len, pos.z}; 
+                g_Walls[mo.wall_index].p2 = {pos.x + w_len, pos.z}; 
+            }
         }
 
         float currentSpeed = sqrt(g_BallVelocity.x * g_BallVelocity.x + g_BallVelocity.z * g_BallVelocity.z);
 
-        if (!g_BallInHole && currentSpeed < 0.05f && abs(g_BallVelocity.y) < 0.05f && !g_IsSwinging) {
+        if (!g_BallInHole && currentSpeed < 0.05f && abs(g_BallVelocity.y) < 0.05f && !g_IsSwinging && !g_UseFreeCamera) {
             if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
                 g_IsCharging = true; g_ShotIntensity += CHARGE_SPEED * deltaTime;
                 if (g_ShotIntensity > MAX_INTENSITY) g_ShotIntensity = MAX_INTENSITY;
@@ -638,10 +675,8 @@ int main(int argc, char* argv[])
                 g_ShotIntensity = 0.0f; g_IsSwinging = false;
                 g_BallVelocity = glm::vec4(-sin(g_CameraTheta), 0.0f, -cos(g_CameraTheta), 0.0f) * g_StoredIntensity;
                 g_Strokes++; 
-                
-                // Toca Som da Tacada Controlado
                 if (g_AudioOK) {
-                    ma_sound_seek_to_pcm_frame(&g_SndTacada, 0); // Reseta o som
+                    ma_sound_seek_to_pcm_frame(&g_SndTacada, 0);
                     ma_sound_start(&g_SndTacada);
                 }
             }
@@ -653,9 +688,17 @@ int main(int argc, char* argv[])
             
             bool on_ramp = false;
             for (auto& f : g_LevelFloors) {
-                if (g_BallPosition.x >= f.cx - f.sx && g_BallPosition.x <= f.cx + f.sx && g_BallPosition.z <= f.cz + f.sz && g_BallPosition.z >= f.cz - f.sz) {
+                float dx = g_BallPosition.x - f.cx;
+                float dz = g_BallPosition.z - f.cz;
+                
+                float z_local = dz;
+                float x_local = dx - f.shear_x * z_local; // FÍSICA: Respeitando a área com cisalhamento matemático
+
+                if (x_local >= -f.sx && x_local <= f.sx && z_local <= f.sz && z_local >= -f.sz) {
                     if (f.pitch != 0.0f) {
-                        on_ramp = true; float gravity_z = tan(f.pitch) * 9.8f; g_BallVelocity.z += gravity_z * deltaTime;
+                        on_ramp = true; 
+                        float gravity = tan(f.pitch) * 9.8f; 
+                        g_BallVelocity.z += gravity * deltaTime;
                     }
                 }
             }
@@ -670,7 +713,6 @@ int main(int argc, char* argv[])
                 if (g_BallVelocity.y < -2.0f) g_BallVelocity.y = -g_BallVelocity.y * 0.3f; else g_BallVelocity.y = 0.0f;
             }
 
-            // CORREÇÃO 2: Morte e Respawn ao cair nos Abismos
             if (g_BallPosition.y < -4.0f) { 
                 g_BallPosition = g_SpawnPosition; g_BallVelocity = glm::vec4(0.0f); g_Strokes++; 
             }
@@ -678,25 +720,25 @@ int main(int argc, char* argv[])
             glm::vec4 nextPos = g_BallPosition; nextPos.x += g_BallVelocity.x * deltaTime; nextPos.z += g_BallVelocity.z * deltaTime;
 
             for (auto& w : g_Walls) {
-                glm::vec2 ab = w.p2 - w.p1; glm::vec2 ac = glm::vec2(nextPos.x, nextPos.z) - w.p1;
-                float t = (ac.x * ab.x + ac.y * ab.y) / (ab.x * ab.x + ab.y * ab.y); t = std::max(0.0f, std::min(t, 1.0f)); 
-                glm::vec2 closest = w.p1 + t * ab; glm::vec2 diff = glm::vec2(nextPos.x, nextPos.z) - closest;
-                float dist = sqrt(diff.x * diff.x + diff.y * diff.y);
-                float wall_thickness_half = 0.15f; float effective_radius = g_BallRadius + wall_thickness_half;
-
-                if (dist < effective_radius && dist > 0.00001f) {
-                    float wall_floor = GetFloorHeight(closest.x, closest.y);
+                glm::vec4 outNormal;
+                float penetration;
+                glm::vec2 closestPoint;
+                float effective_radius = g_BallRadius + 0.15f; 
+                
+                if (CheckSphereWallCollision(nextPos, effective_radius, w.p1, w.p2, outNormal, penetration, closestPoint)) {
+                    float wall_floor = GetFloorHeight(closestPoint.x, closestPoint.y);
                     if (g_BallPosition.y + g_BallRadius >= wall_floor && g_BallPosition.y - g_BallRadius <= wall_floor + 0.45f) {
-                        glm::vec2 n(diff.x / dist, diff.y / dist);
-                        nextPos.x = closest.x + n.x * effective_radius; nextPos.z = closest.y + n.y * effective_radius;
-                        glm::vec2 v(g_BallVelocity.x, g_BallVelocity.z); float v_dot_n = v.x * n.x + v.y * n.y;
+                        nextPos.x += outNormal.x * penetration;
+                        nextPos.z += outNormal.z * penetration;
+                        
+                        glm::vec2 v(g_BallVelocity.x, g_BallVelocity.z);
+                        float v_dot_n = v.x * outNormal.x + v.y * outNormal.z;
                         if (v_dot_n < 0.0f) {
-                            v.x = v.x - 1.8f * v_dot_n * n.x; v.y = v.y - 1.8f * v_dot_n * n.y; 
-                            g_BallVelocity.x = v.x; g_BallVelocity.z = v.y;
-
-                            // Toca o Som da Parede apenas se o impacto for forte o suficiente
-                            if (g_AudioOK && abs(v_dot_n) > 0.3f) {
-                                ma_sound_seek_to_pcm_frame(&g_SndQuique, 0); // Reseta
+                            g_BallVelocity.x -= 1.8f * v_dot_n * outNormal.x;
+                            g_BallVelocity.z -= 1.8f * v_dot_n * outNormal.z;
+                            
+                            if (g_AudioOK && std::abs(v_dot_n) > 0.3f) {
+                                ma_sound_seek_to_pcm_frame(&g_SndQuique, 0); 
                                 ma_sound_start(&g_SndQuique);
                             }
                         }
@@ -704,14 +746,18 @@ int main(int argc, char* argv[])
                 }
             }
 
-            glm::vec2 to_pole(nextPos.x - g_HolePosition.x, nextPos.z - g_HolePosition.z);
-            float dist_p = sqrt(to_pole.x*to_pole.x + to_pole.y*to_pole.y); float pole_radius = 0.015f; 
-            
-            if (dist_p < g_BallRadius + pole_radius && g_BallPosition.y > floor_y - 0.1f) {
-                glm::vec2 n = to_pole / dist_p;
-                nextPos.x += n.x * ((g_BallRadius + pole_radius) - dist_p); nextPos.z += n.y * ((g_BallRadius + pole_radius) - dist_p);
-                float dot_v_n = g_BallVelocity.x * n.x + g_BallVelocity.z * n.y;
-                if (dot_v_n < 0.0f) { g_BallVelocity.x -= 1.5f * dot_v_n * n.x; g_BallVelocity.z -= 1.5f * dot_v_n * n.y; }
+            glm::vec4 outPoleNormal;
+            float polePenetration;
+            if (CheckSpherePointCollision(nextPos, g_BallRadius, glm::vec2(g_HolePosition.x, g_HolePosition.z), 0.015f, outPoleNormal, polePenetration)) {
+                if (g_BallPosition.y > floor_y - 0.1f) {
+                    nextPos.x += outPoleNormal.x * polePenetration;
+                    nextPos.z += outPoleNormal.z * polePenetration;
+                    float dot_v_n = g_BallVelocity.x * outPoleNormal.x + g_BallVelocity.z * outPoleNormal.z;
+                    if (dot_v_n < 0.0f) { 
+                        g_BallVelocity.x -= 1.5f * dot_v_n * outPoleNormal.x; 
+                        g_BallVelocity.z -= 1.5f * dot_v_n * outPoleNormal.z; 
+                    }
+                }
             }
 
             glm::vec3 movement(nextPos.x - g_BallPosition.x, 0.0f, nextPos.z - g_BallPosition.z);
@@ -729,13 +775,7 @@ int main(int argc, char* argv[])
             if (distToHole < g_HoleRadius * 1.1f && g_BallPosition.y <= floor_y + 0.15f) {
                 if (speed < 5.5f && !g_BallInHole) {
                     g_BallInHole = true; g_HoleCooldown = 2.5f;
-
-                    // --- TOCA O SOM DA BOLA CAINDO ---
-                    if (g_AudioOK) {
-                        ma_sound_seek_to_pcm_frame(&g_SndCaindo, 0);
-                        ma_sound_start(&g_SndCaindo);
-                    }
-
+                    if (g_AudioOK) { ma_sound_seek_to_pcm_frame(&g_SndCaindo, 0); ma_sound_start(&g_SndCaindo); }
                     g_BallVelocity.y = -2.5f; g_BallVelocity.x *= 0.05f; g_BallVelocity.z *= 0.05f;
                     g_ScoreHistory.push_back(g_Strokes);
                     int MAP_PAR = (g_CurrentLevel == 1) ? 4 : (g_CurrentLevel == 2 ? 3 : (g_CurrentLevel == 3 ? 5 : 4)); 
@@ -757,33 +797,70 @@ int main(int argc, char* argv[])
 
         if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) LoadLevel(g_CurrentLevel);
 
-        float ideal_r = g_CameraDistance; float cam_y = ideal_r * sin(g_CameraPhi); float cam_z = ideal_r * cos(g_CameraPhi) * cos(g_CameraTheta); float cam_x = ideal_r * cos(g_CameraPhi) * sin(g_CameraTheta);
-        glm::vec4 camera_lookat  = g_BallPosition; if(g_BallInHole) camera_lookat.y = g_HolePosition.y;
-        glm::vec4 ideal_cam_pos = g_BallPosition + glm::vec4(cam_x, cam_y, cam_z, 0.0f);
-        
-        float max_dist = ideal_r; glm::vec2 ray_origin(g_BallPosition.x, g_BallPosition.z); glm::vec2 ray_dir(ideal_cam_pos.x - g_BallPosition.x, ideal_cam_pos.z - g_BallPosition.z);
-        float ray_len = sqrt(ray_dir.x * ray_dir.x + ray_dir.y * ray_dir.y);
-        if (ray_len > 0.001f) { ray_dir.x /= ray_len; ray_dir.y /= ray_len; } else { ray_dir.x = 0.001f; ray_dir.y = 0.001f; }
+        glm::mat4 view;
+        glm::mat4 projection = Matrix_Perspective(g_CameraFOV, g_ScreenRatio, -0.1f, -50.0f);
+
+        if (g_UseFreeCamera) {
+            float camSpeed = 5.0f * deltaTime;
+            if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) camSpeed *= 2.5f;
+
+            glm::vec4 forward = glm::vec4(
+                sin(g_FreeCameraTheta) * cos(g_FreeCameraPhi),
+                sin(g_FreeCameraPhi),
+                cos(g_FreeCameraTheta) * cos(g_FreeCameraPhi),
+                0.0f
+            );
+            glm::vec4 right = glm::vec4(
+                sin(g_FreeCameraTheta - 1.5708f),
+                0.0f,
+                cos(g_FreeCameraTheta - 1.5708f),
+                0.0f
+            );
+
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) g_FreeCameraPos -= forward * camSpeed;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) g_FreeCameraPos += forward * camSpeed;
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) g_FreeCameraPos -= right * camSpeed;
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) g_FreeCameraPos += right * camSpeed;
+
+            view = Matrix_Camera_View(g_FreeCameraPos, -forward, glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+
+        } else {
+            float ideal_r = g_CameraDistance; 
+            float cam_y = ideal_r * sin(g_CameraPhi); 
+            float cam_z = ideal_r * cos(g_CameraPhi) * cos(g_CameraTheta); 
+            float cam_x = ideal_r * cos(g_CameraPhi) * sin(g_CameraTheta);
             
-        for (auto& w : g_Walls) {
-            glm::vec2 v1 = ray_origin - w.p1; glm::vec2 v2 = w.p2 - w.p1; glm::vec2 v3 = glm::vec2(-ray_dir.y, ray_dir.x);
-            float dot_v2_v3 = v2.x * v3.x + v2.y * v3.y;
-            if (std::abs(dot_v2_v3) < 0.00001f) continue;
-            float t1 = (v2.x * v1.y - v2.y * v1.x) / dot_v2_v3; float t2 = (v1.x * v3.x + v1.y * v3.y) / dot_v2_v3;
-            if (t1 >= 0.0f && t1 <= max_dist && t2 >= 0.0f && t2 <= 1.0f) {
-                float v2_len = sqrt(v2.x * v2.x + v2.y * v2.y);
-                if (v2_len > 0.0001f) {
-                    glm::vec2 wall_dir(v2.x / v2_len, v2.y / v2_len); glm::vec2 outward_normal(-wall_dir.y, wall_dir.x);
-                    float approach_angle = ray_dir.x * outward_normal.x + ray_dir.y * outward_normal.y; float margin = 0.45f; 
-                    if (approach_angle < 0.0f) margin += 0.30f / std::max(0.2f, std::abs(approach_angle));
-                    if (t1 - margin < max_dist) max_dist = t1 - margin; 
+            glm::vec4 camera_lookat = g_BallPosition; if(g_BallInHole) camera_lookat.y = g_HolePosition.y;
+            glm::vec4 ideal_cam_pos = g_BallPosition + glm::vec4(cam_x, cam_y, cam_z, 0.0f);
+            
+            float max_dist = ideal_r; 
+            glm::vec2 ray_origin(g_BallPosition.x, g_BallPosition.z); 
+            glm::vec2 ray_dir(ideal_cam_pos.x - g_BallPosition.x, ideal_cam_pos.z - g_BallPosition.z);
+            
+            float ray_len = sqrt(ray_dir.x * ray_dir.x + ray_dir.y * ray_dir.y);
+            if (ray_len > 0.001f) { ray_dir.x /= ray_len; ray_dir.y /= ray_len; } else { ray_dir.x = 0.001f; ray_dir.y = 0.001f; }
+                
+            for (auto& w : g_Walls) {
+                float tIntersect;
+                if (CheckRaySegmentIntersection(ray_origin, ray_dir, w.p1, w.p2, tIntersect)) {
+                    if (tIntersect <= max_dist) {
+                        glm::vec2 v2 = w.p2 - w.p1;
+                        float v2_len = sqrt(v2.x * v2.x + v2.y * v2.y);
+                        if (v2_len > 0.0001f) {
+                            glm::vec2 wall_dir(v2.x / v2_len, v2.y / v2_len); glm::vec2 outward_normal(-wall_dir.y, wall_dir.x);
+                            float approach_angle = ray_dir.x * outward_normal.x + ray_dir.y * outward_normal.y; float margin = 0.45f; 
+                            if (approach_angle < 0.0f) margin += 0.30f / std::max(0.2f, std::abs(approach_angle));
+                            if (tIntersect - margin < max_dist) max_dist = tIntersect - margin; 
+                        }
+                    }
                 }
             }
+            
+            float actual_dist = std::max(0.12f, max_dist); glm::vec4 final_cam_pos = g_BallPosition;
+            final_cam_pos.x += ray_dir.x * actual_dist; final_cam_pos.y += std::max(0.10f, cam_y * (actual_dist / ideal_r)); final_cam_pos.z += ray_dir.y * actual_dist;
+            
+            view = Matrix_Camera_View(final_cam_pos, camera_lookat - final_cam_pos, glm::vec4(0.0f,1.0f,0.0f,0.0f));
         }
-        
-        float actual_dist = std::max(0.12f, max_dist); glm::vec4 final_cam_pos = g_BallPosition;
-        final_cam_pos.x += ray_dir.x * actual_dist; final_cam_pos.y += std::max(0.10f, cam_y * (actual_dist / ideal_r)); final_cam_pos.z += ray_dir.y * actual_dist;
-        glm::mat4 view = Matrix_Camera_View(final_cam_pos, camera_lookat - final_cam_pos, glm::vec4(0.0f,1.0f,0.0f,0.0f)); glm::mat4 projection = Matrix_Perspective(g_CameraFOV, g_ScreenRatio, -0.1f, -50.0f);
 
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -797,7 +874,8 @@ int main(int argc, char* argv[])
         glUniform1i(g_object_id_uniform, FLOOR);
         glm::mat4 model;
         for (auto& f : g_LevelFloors) {
-            model = Matrix_Translate(f.cx, f.y, f.cz) * Matrix_Rotate_X(f.pitch) * Matrix_Scale(f.sx, 1.0f, f.sz);
+            // MATEMÁTICA: O chão sofre cisalhamento e se inclina perfeitamente entre as diagonais
+            model = Matrix_Translate(f.cx, f.y, f.cz) * Matrix_Shear_X_Z(f.shear_x) * Matrix_Rotate_X(f.pitch) * Matrix_Scale(f.sx, 1.0f, f.sz);
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model)); DrawVirtualObject("the_plane");
         }
 
@@ -817,7 +895,6 @@ int main(int argc, char* argv[])
             if(cube_size.x == 0) cube_size.x = 1.0f; if(cube_size.y == 0) cube_size.y = 1.0f; if(cube_size.z == 0) cube_size.z = 1.0f;
         }
 
-        // RENDERIZAÇÃO DAS PAREDES INCLINADAS
         int wall_index = 0;
         for (auto& w : g_Walls) {
             wall_index++;
@@ -828,17 +905,22 @@ int main(int argc, char* argv[])
             float angle_y = atan2(w.p1.x - w.p2.x, w.p1.y - w.p2.y);
             
             float shrink = (wall_index % 2 == 0) ? 0.005f : 0.0f; 
-            float height = 0.35f - shrink; float thickness = 0.30f - shrink; float final_len = wall_len + 0.30f;
+            float thickness = 0.30f - shrink; float final_len = wall_len + 0.30f;
 
             float y1 = GetFloorHeight(w.p1.x, w.p1.y); float y2 = GetFloorHeight(w.p2.x, w.p2.y);
             if (y1 <= -5.0f) y1 = GetFloorHeight(cx, cz); if (y2 <= -5.0f) y2 = GetFloorHeight(cx, cz);
             if (y1 <= -5.0f) y1 = -0.2f; if (y2 <= -5.0f) y2 = -0.2f;
 
             float pitch_x = atan2(y2 - y1, wall_len);
-            float base_y = (y1 + y2) * 0.5f - 0.02f; float center_y = base_y + (height * 0.5f);
+            float top_y = (y1 + y2) * 0.5f + 0.35f; 
+            
+            // Altura normalizada! Apenas o suficiente para esconder a espessura da laje (sem ser gigante)
+            float wall_height = 0.8f; 
+            float center_y = top_y - (wall_height * 0.5f);
 
             model = Matrix_Translate(cx, center_y, cz) * Matrix_Rotate_Y(angle_y) * Matrix_Rotate_X(pitch_x) 
-                  * Matrix_Scale(thickness / cube_size.x, height / cube_size.y, final_len / cube_size.z) * Matrix_Translate(-cube_pivot.x, -cube_pivot.y, -cube_pivot.z);
+                  * Matrix_Scale(thickness / cube_size.x, wall_height / cube_size.y, final_len / cube_size.z) 
+                  * Matrix_Translate(-cube_pivot.x, -cube_pivot.y, -cube_pivot.z);
                   
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model)); DrawVirtualObject("Cube"); 
         }
@@ -874,7 +956,7 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model)); DrawVirtualObject("golf_ball");
 
         glUniform1i(g_object_id_uniform, CLUB);
-        if (!g_BallInHole && (currentSpeed == 0.0f || g_IsSwinging) && abs(g_BallVelocity.y) < 0.05f) {
+        if (!g_BallInHole && (currentSpeed == 0.0f || g_IsSwinging) && abs(g_BallVelocity.y) < 0.05f && !g_UseFreeCamera) {
             float club_scale = 1.0f; glm::vec3 pivot(0.0f);
             if(g_VirtualScene.count("rdmobj00")) {
                 glm::vec3 c_min = g_VirtualScene["rdmobj00"].bbox_min; glm::vec3 c_max = g_VirtualScene["rdmobj00"].bbox_max;
@@ -892,7 +974,7 @@ int main(int argc, char* argv[])
             glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); DrawVirtualObject("rdmobj00"); glDisable(GL_BLEND);
         }
 
-        if (g_IsCharging) {
+        if (g_IsCharging && !g_UseFreeCamera) {
             glDisable(GL_DEPTH_TEST);
             glm::mat4 hud_view = Matrix_Identity(); glm::mat4 hud_proj = Matrix_Identity();
             glUniformMatrix4fv(g_view_uniform, 1, GL_FALSE, glm::value_ptr(hud_view));
@@ -932,19 +1014,18 @@ int main(int argc, char* argv[])
                 glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model_hud)); DrawVirtualObject("the_plane");
                 glEnable(GL_DEPTH_TEST); 
 
-                PrintBold(window, "RANKING DO CAMPEONATO", -0.45f, 0.7f, 2.5f);
+                PrintBold(window, "RANKING", -0.45f, 0.7f, 2.5f);
                 
                 float start_y = 0.4f;
                 int total_strokes = 0;
                 int total_par = 0;
 
-                // Cabeçalho da Tabela
                 PrintBold(window, "BURACO | PAR | TACADAS | +/-", -0.6f, start_y + 0.15f, 1.5f);
 
                 for (size_t i = 0; i < g_ScoreHistory.size(); i++) {
                     int strokes = g_ScoreHistory[i];
                     int par = g_ParHistory[i];
-                    int diff = strokes - par; // Diferencial: +/- em relação ao Par
+                    int diff = strokes - par; 
                     
                     char buf[128]; 
                     snprintf(buf, 128, "   %02d  |  %d  |    %d    |  %+d", (int)(i+1), par, strokes, diff);
@@ -954,7 +1035,6 @@ int main(int argc, char* argv[])
                     total_par += par;
                 }
                 
-                // Total acumulado
                 char buf_tot[128]; 
                 int total_diff = total_strokes - total_par;
                 snprintf(buf_tot, 128, "TOTAL: %d TACADAS (PAR %d) | DIF: %+d", total_strokes, total_par, total_diff);
@@ -980,8 +1060,16 @@ int main(int argc, char* argv[])
             if (g_IsRandomMode) snprintf(txtInfo, 60, "PISTA: RANDOM %02d/%02d  |  PAR: %d", g_RandomModeCurrentHole, g_RandomModeTotalHoles, MAP_PAR);
             else snprintf(txtInfo, 60, "PISTA: BURACO 0%d  |  PAR: %d", g_CurrentLevel, MAP_PAR);
             PrintBold(window, txtInfo, -0.95f, 0.92f, 1.3f);
+            
             char txtStrokes[40]; snprintf(txtStrokes, 40, "TACADAS TOTAIS: %d", g_Strokes);
             PrintBold(window, txtStrokes, -0.95f, 0.78f, 1.8f); 
+            
+            // TEXTO NOVO QUANDO A FREECAM É ATIVADA 
+            if(g_UseFreeCamera) {
+                PrintBold(window, "[ FREE CAMERA ] Movimentacao: WASD + Mouse", -0.95f, 0.65f, 1.4f);
+            }
+
+            PrintBold(window, "TECLAS: [ C ] Trocar Camera   [ MOUSE ] Visao   [ ESPAÇO ] Tacada   [ R ] Reiniciar", -0.95f, -0.92f, 1.45f);
         }
 
         TextRendering_ShowFramesPerSecond(window);
@@ -989,7 +1077,6 @@ int main(int argc, char* argv[])
         glfwPollEvents();
     }
     
-    // Loop principal da Janela estava AQUI em cima. Isso é para descarregar a memória no final!
     if (g_AudioOK) {
         ma_sound_uninit(&g_SndTacada);
         ma_sound_uninit(&g_SndQuique);
@@ -1129,13 +1216,31 @@ void FramebufferSizeCallback(GLFWwindow* window, int width, int height) { glView
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods) { if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) { glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY); g_LeftMouseButtonPressed = true; } if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) g_LeftMouseButtonPressed = false; }
 void ErrorCallback(int error, const char* description) {}
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) { g_CameraDistance -= 0.5f * (float)yoffset; if (g_CameraDistance < 0.5f) g_CameraDistance = 0.5f; }
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode) { if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window, GL_TRUE); }
+
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode) { 
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window, GL_TRUE); 
+    if (key == GLFW_KEY_C && action == GLFW_PRESS) {
+        g_UseFreeCamera = !g_UseFreeCamera;
+    }
+}
 
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos) { 
     if (g_LeftMouseButtonPressed) { 
-        g_CameraTheta -= g_CameraSensitivity * (float)(xpos - g_LastCursorPosX); 
-        g_CameraPhi += g_CameraSensitivity * (float)(ypos - g_LastCursorPosY); 
-        float phimax = 1.56f; if (g_CameraPhi > phimax) g_CameraPhi = phimax; if (g_CameraPhi < 0.05f) g_CameraPhi = 0.05f; 
+        float deltaX = (float)(xpos - g_LastCursorPosX);
+        float deltaY = (float)(ypos - g_LastCursorPosY);
+        
+        if (g_InvertMouseY) deltaY = -deltaY;
+
+        if (g_UseFreeCamera) {
+            g_FreeCameraTheta -= g_CameraSensitivity * deltaX; 
+            g_FreeCameraPhi   -= g_CameraSensitivity * deltaY; 
+            if (g_FreeCameraPhi > 1.56f) g_FreeCameraPhi = 1.56f;
+            if (g_FreeCameraPhi < -1.56f) g_FreeCameraPhi = -1.56f;
+        } else {
+            g_CameraTheta -= g_CameraSensitivity * deltaX; 
+            g_CameraPhi += g_CameraSensitivity * deltaY; 
+            float phimax = 1.56f; if (g_CameraPhi > phimax) g_CameraPhi = phimax; if (g_CameraPhi < 0.05f) g_CameraPhi = 0.05f; 
+        }
         g_LastCursorPosX = xpos; g_LastCursorPosY = ypos; 
     } 
 }
