@@ -417,7 +417,7 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Golf it Again! - Guilherme M. Mulazzani", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Mini Golf it Again! - Guilherme M. Mulazzani", NULL, NULL);
     if (!window) { glfwTerminate(); std::exit(EXIT_FAILURE); }
 
     glfwSetKeyCallback(window, KeyCallback);
